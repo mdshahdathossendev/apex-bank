@@ -114,7 +114,11 @@ export default async function CustomerPersonalDataEditor({
           Back to customers
         </Link>
       </header>
-      <EditCustomerForm userId={userId} initialData={initialData} />
+      <EditCustomerForm
+        userId={userId}
+        initialData={initialData}
+        backHref={backHref}
+      />
     </main>
   );
 }

@@ -4,13 +4,16 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { updateCustomerPersonalData } from "@/lib/action";
 import type { CustomerPersonalDataUpdate } from "@/lib/action";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 export default function EditCustomerForm({
   userId,
   initialData,
+  backHref,
 }: {
   userId: string;
   initialData: CustomerPersonalDataUpdate;
+  backHref: string;
 }) {
   const router = useRouter();
   const [message, setMessage] = useState("");
@@ -49,6 +52,18 @@ export default function EditCustomerForm({
       setIsSaving(false);
     }
   };
+
+  if (message) {
+    return (
+      <ActionSuccessPage
+        title="Customer information updated"
+        description={message}
+        details={[{ label: "Customer", value: initialData.name }]}
+        primaryLabel="Back to customers"
+        primaryHref={backHref}
+      />
+    );
+  }
 
   return (
     <form
@@ -158,11 +173,6 @@ export default function EditCustomerForm({
         >
           {isSaving ? "Saving changes..." : "Save customer details"}
         </button>
-        {message ? (
-          <p role="status" className="text-sm text-emerald-700">
-            {message}
-          </p>
-        ) : null}
         {error ? (
           <p role="alert" className="text-sm text-red-700">
             {error}

@@ -1,7 +1,10 @@
 import { headers } from "next/headers";
 import AllBankAccounts from "@/Component/AllBankAccounts";
 import { auth } from "@/lib/auth";
-import { getAllBankAccounts } from "@/lib/data";
+import {
+  getAllBankAccounts,
+  getCustomerAccountContacts,
+} from "@/lib/data";
 
 export default async function AdminAllAccountsPage() {
   const session = await auth.api.getSession({
@@ -17,6 +20,9 @@ export default async function AdminAllAccountsPage() {
     );
   }
 
-  const accounts = await getAllBankAccounts();
-  return <AllBankAccounts accounts={accounts} />;
+  const [accounts, customers] = await Promise.all([
+    getAllBankAccounts(),
+    getCustomerAccountContacts(),
+  ]);
+  return <AllBankAccounts accounts={accounts} customers={customers} />;
 }

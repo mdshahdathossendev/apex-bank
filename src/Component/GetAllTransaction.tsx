@@ -12,6 +12,7 @@ import {
   Search,
 } from "lucide-react";
 import { approveTransaction } from "@/lib/action";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 interface TransactionRecord {
   _id?: unknown;
@@ -175,6 +176,12 @@ export default function GetAllTransactions({
     status: "success" | "rejected";
     message: string;
   } | null>(null);
+  const [approvalReceipt, setApprovalReceipt] = useState<{
+    message: string;
+    type: string;
+    amount: number;
+    accountNumber: string;
+  } | null>(null);
 
   const transactions = Array.isArray(data) ? data.filter(isRecord) : [];
   const currentStatus = (transaction: TransactionRecord) => {
@@ -272,6 +279,14 @@ export default function GetAllTransactions({
           [transactionId]: result.status,
         }));
         setApprovalNotice(result);
+        if (result.status === "success") {
+          setApprovalReceipt({
+            message: result.message,
+            type: transactionType(transaction),
+            amount: amountValue(transaction.amount) ?? 0,
+            accountNumber: text(transaction.accountNumber),
+          });
+        }
         router.refresh();
     } catch (error) {
         setApprovalError(
@@ -318,6 +333,29 @@ export default function GetAllTransactions({
       color: "bg-emerald-50 text-emerald-700",
     },
   ];
+
+  if (approvalReceipt) {
+    return (
+      <ActionSuccessPage
+        title={`${approvalReceipt.type === "deposit" ? "Deposit" : "Withdrawal"} approved`}
+        description={approvalReceipt.message}
+        details={[
+          {
+            label: "Amount",
+            value: formatCurrency(approvalReceipt.amount),
+          },
+          { label: "Account", value: approvalReceipt.accountNumber || "—" },
+        ]}
+        primaryLabel="Back to transactions"
+        secondaryHref="/dashboard/staff"
+        onContinue={() => {
+          setApprovalReceipt(null);
+          setApprovalNotice(null);
+          router.refresh();
+        }}
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-7xl space-y-7">

@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { loneRequest, type LoanApplicationInput } from "@/lib/action";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 const loanTypes = [
   "Personal loan",
@@ -99,6 +100,23 @@ export default function LoanApplicationPage() {
           maximumFractionDigits: 0,
         }).format(numericAmount)
       : "৳0";
+
+  if (message?.type === "success") {
+    return (
+      <ActionSuccessPage
+        title="Loan application submitted"
+        description="Your application was saved and sent to staff for review. You will be notified after it is reviewed."
+        details={[
+          { label: "Loan type", value: loanType },
+          { label: "Requested amount", value: formattedAmount },
+          { label: "Repayment term", value: `${termMonths} months` },
+        ]}
+        primaryLabel="Back to loan center"
+        primaryHref="/dashboard/coustomer/lone"
+        secondaryHref="/dashboard/coustomer"
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-6xl space-y-7">
@@ -318,14 +336,10 @@ export default function LoanApplicationPage() {
             </div>
           </section>
 
-          {message && (
+          {message?.type === "error" && (
             <p
-              className={`rounded-xl p-3 text-sm ${
-                message.type === "success"
-                  ? "bg-green-50 text-green-800"
-                  : "bg-red-50 text-red-800"
-              }`}
-              role={message.type === "error" ? "alert" : "status"}
+              className="rounded-xl bg-red-50 p-3 text-sm text-red-800"
+              role="alert"
             >
               {message.text}
             </p>

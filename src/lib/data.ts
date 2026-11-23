@@ -9,6 +9,40 @@ export async function allUserData() {
 
   return recordsFromResponse(await response.json(), "users");
 }
+
+export interface CustomerAccountContact {
+  id?: string;
+  databaseId?: string;
+  email?: string;
+}
+
+function serializedId(value: unknown): string | undefined {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "$oid" in value &&
+    typeof value.$oid === "string"
+  ) {
+    return value.$oid;
+  }
+  return undefined;
+}
+
+export async function getCustomerAccountContacts(): Promise<
+  CustomerAccountContact[]
+> {
+  const users = await allUserData();
+  return users.map((user) => ({
+    id: optionalString(user.id),
+    databaseId: serializedId(user._id),
+    email: optionalString(user.email),
+  }));
+}
+
 export async function getUserById(userId: string) {
   const response = await fetch(`http://localhost:4000/api/application/${userId}`, {
     cache: "no-store",
@@ -33,6 +67,16 @@ export interface BankAccountSummary {
   userId?: string;
   accountNumber: string;
   name?: string;
+  fatherName?: string;
+  motherName?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  nationality?: string;
+  maritalStatus?: string;
+  occupation?: string;
+  nidNumber?: string;
+  presentAddress?: string;
+  permanentAddress?: string;
   accountType?: string;
   branchId?: string;
   status: string;
@@ -225,6 +269,16 @@ export async function getAllBankAccounts(): Promise<BankAccountSummary[]> {
         userId: optionalString(record.userId),
         accountNumber,
         name: optionalString(record.name),
+        fatherName: optionalString(record.fatherName),
+        motherName: optionalString(record.motherName),
+        dateOfBirth: optionalString(record.dateOfBirth),
+        gender: optionalString(record.gender),
+        nationality: optionalString(record.nationality),
+        maritalStatus: optionalString(record.maritalStatus),
+        occupation: optionalString(record.occupation),
+        nidNumber: optionalString(record.nidNumber),
+        presentAddress: optionalString(record.presentAddress),
+        permanentAddress: optionalString(record.permanentAddress),
         accountType: optionalString(record.accountType),
         branchId: optionalString(record.branchId),
         status,
@@ -321,14 +375,14 @@ export async function getLoanApplicationById(id: string): Promise<unknown> {
   return response.json();
 }
 
-export interface StaffDashboardData {
+export interface DashboardOverviewData {
   users: Record<string, unknown>[];
   accounts: Record<string, unknown>[];
   transactions: Record<string, unknown>[];
   loanApplications: Record<string, unknown>[];
 }
 
-async function fetchStaffRecords(
+async function fetchDashboardRecords(
   endpoint: string,
   resource: string,
 ): Promise<Record<string, unknown>[]> {
@@ -341,12 +395,16 @@ async function fetchStaffRecords(
   return recordsFromResponse(await response.json(), resource);
 }
 
-export async function getStaffDashboardData(): Promise<StaffDashboardData> {
+export async function getAdminOverviewData(): Promise<DashboardOverviewData> {
   const [users, accounts, transactions, loanApplications] = await Promise.all([
-    fetchStaffRecords("/api/users", "users"),
-    fetchStaffRecords("/api/application", "accounts"),
-    fetchStaffRecords("/api/transactions", "transactions"),
-    fetchStaffRecords("/api/loan-application-staff", "loan applications"),
+    fetchDashboardRecords("/api/users", "users"),
+    fetchDashboardRecords("/api/application", "accounts"),
+    fetchDashboardRecords("/api/transactions", "transactions"),
+    fetchDashboardRecords("/api/loan-application-staff", "loan applications"),
   ]);
   return { users, accounts, transactions, loanApplications };
+}
+
+export async function getStaffDashboardData(): Promise<DashboardOverviewData> {
+  return getAdminOverviewData();
 }

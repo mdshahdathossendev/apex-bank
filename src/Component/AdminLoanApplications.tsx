@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { HandCoins, Search } from "lucide-react";
 import { approveLoanApplication } from "@/lib/action";
 import type { BankAccountSummary } from "@/lib/data";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 type LoanApplicationRecord = Record<string, unknown>;
 type StatusFilter = "all" | "pending" | "approved" | "rejected" | "other";
@@ -125,6 +126,8 @@ export default function AdminLoanApplications({
     recordId: string;
     type: "success" | "error";
     message: string;
+    amount?: number;
+    accountNumber?: string;
   } | null>(null);
   const applications = useMemo(
     () => (Array.isArray(data) ? data.filter(isRecord) : []),
@@ -152,6 +155,8 @@ export default function AdminLoanApplications({
         recordId,
         type: "success",
         message: result.message,
+        amount: result.amount,
+        accountNumber: result.accountNumber,
       });
       router.refresh();
     } catch (error) {
@@ -207,6 +212,35 @@ export default function AdminLoanApplications({
         .sort((left, right) => submittedTime(right) - submittedTime(left)),
     [applications, query, statusFilter],
   );
+
+  if (approvalNotice?.type === "success") {
+    return (
+      <ActionSuccessPage
+        title="Loan approved and disbursed"
+        description={approvalNotice.message}
+        details={[
+          {
+            label: "Amount credited",
+            value: new Intl.NumberFormat("en-BD", {
+              style: "currency",
+              currency: "BDT",
+              maximumFractionDigits: 2,
+            }).format(approvalNotice.amount ?? 0),
+          },
+          {
+            label: "Customer account",
+            value: approvalNotice.accountNumber ?? "Not recorded",
+          },
+        ]}
+        primaryLabel="Back to loan applications"
+        secondaryHref="/dashboard/admin"
+        onContinue={() => {
+          setApprovalNotice(null);
+          router.refresh();
+        }}
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-7xl space-y-6">

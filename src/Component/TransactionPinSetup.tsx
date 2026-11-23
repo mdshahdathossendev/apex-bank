@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { setTransactionPin } from "@/lib/action";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 export default function TransactionPinSetup({
   accountNumber,
@@ -40,6 +41,19 @@ export default function TransactionPinSetup({
       setIsSubmitting(false);
     }
   };
+
+  if (message) {
+    return (
+      <ActionSuccessPage
+        title="Transaction PIN saved"
+        description={message}
+        details={[{ label: "Account", value: accountNumber }]}
+        primaryLabel="Back to my account"
+        primaryHref="/dashboard/coustomer/my-account"
+        secondaryHref="/dashboard/coustomer"
+      />
+    );
+  }
 
   return (
     <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:p-6">
@@ -90,11 +104,6 @@ export default function TransactionPinSetup({
           </button>
         </div>
       </form>
-      {message ? (
-        <p role="status" className="mt-3 text-sm text-emerald-700">
-          {message}
-        </p>
-      ) : null}
       {error ? (
         <p role="alert" className="mt-3 text-sm text-red-700">
           {error}

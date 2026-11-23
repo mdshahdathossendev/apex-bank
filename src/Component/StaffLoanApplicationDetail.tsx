@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText, Send } from "lucide-react";
 import { loneRequestAdmin } from "@/lib/action";
 import type { LoanApplicationAdminNote } from "@/lib/action";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 type LoanApplication = Record<string, unknown>;
 
@@ -120,6 +121,28 @@ export default function StaffLoanApplicationDetail({
     }
   };
 
+  if (notice?.kind === "success") {
+    return (
+      <ActionSuccessPage
+        title="Loan note sent to admin"
+        description={notice.message}
+        details={[
+          {
+            label: "Applicant",
+            value: text(application.applicantName) || "Not recorded",
+          },
+          {
+            label: "Loan type",
+            value: text(application.loanType) || "Loan",
+          },
+        ]}
+        primaryLabel="Back to loan applications"
+        primaryHref="/dashboard/staff/lon-application"
+        secondaryHref="/dashboard/staff"
+      />
+    );
+  }
+
   return (
     <main className="mx-auto max-w-5xl space-y-6">
       <Link
@@ -225,14 +248,10 @@ export default function StaffLoanApplicationDetail({
               {isSending ? "Sending..." : "Send note to admin"}
             </button>
           </div>
-          {notice && (
+          {notice?.kind === "error" && (
             <p
-              role="status"
-              className={`rounded-lg px-4 py-3 text-sm ${
-                notice.kind === "success"
-                  ? "bg-emerald-50 text-emerald-800"
-                  : "bg-red-50 text-red-800"
-              }`}
+              role="alert"
+              className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800"
             >
               {notice.message}
             </p>

@@ -3,12 +3,15 @@
 import type { FormEvent } from "react";
 import { createAccount, type CreateAccountInput } from "@/lib/action";
 import { useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 export default function CreateAccountPage() {
   const searchParams = useSearchParams();
   const customerId = searchParams.get("customerId");
   const { data: session, isPending } = authClient.useSession();
   const name = session?.user?.name ?? "";
+  const [createdAccountNumber, setCreatedAccountNumber] = useState("");
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -38,13 +41,29 @@ export default function CreateAccountPage() {
 
     try {
       const result = await createAccount(accountData);
-      alert(`Account created successfully. Account number: ${result.accountNumber}`);
+      setCreatedAccountNumber(result.accountNumber);
     } catch (error) {
       alert(
         error instanceof Error ? error.message : "Account creation failed",
       );
     }
   };
+
+  if (createdAccountNumber) {
+    return (
+      <ActionSuccessPage
+        title="Bank account created"
+        description="The customer account was created and is ready to use."
+        details={[
+          { label: "Account holder", value: name },
+          { label: "Account number", value: createdAccountNumber },
+        ]}
+        primaryLabel="View customers"
+        primaryHref="/dashboard/staff/all-users"
+        secondaryHref="/dashboard/staff"
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">

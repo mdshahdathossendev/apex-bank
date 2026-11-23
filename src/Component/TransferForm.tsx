@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeftRight, ShieldCheck } from "lucide-react";
 import { transferFunds } from "@/lib/action";
 import type { CustomerAccountSummary } from "@/lib/data";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 const MAX_TRANSFER_AMOUNT = 20_000;
 
@@ -39,7 +40,12 @@ export default function TransferForm({
   const [description, setDescription] = useState("");
   const [transactionPin, setTransactionPin] = useState("");
   const [error, setError] = useState("");
-  const [result, setResult] = useState("");
+  const [transferReceipt, setTransferReceipt] = useState<{
+    transactionId: string;
+    amount: number;
+    sourceAccountNumber: string;
+    recipientAccountNumber: string;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const sourceAccount = accounts.find(
@@ -55,7 +61,7 @@ export default function TransferForm({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    setResult("");
+    setTransferReceipt(null);
     setIsSubmitting(true);
 
     try {
@@ -66,9 +72,12 @@ export default function TransferForm({
         description,
         transactionPin,
       });
-      setResult(
-        `Transfer complete. Transaction ID: ${transfer.transactionId}`,
-      );
+      setTransferReceipt({
+        transactionId: transfer.transactionId,
+        amount: transfer.amount,
+        sourceAccountNumber,
+        recipientAccountNumber,
+      });
       setTransactionPin("");
       router.refresh();
     } catch (submitError) {
@@ -81,6 +90,37 @@ export default function TransferForm({
       setIsSubmitting(false);
     }
   };
+
+  if (transferReceipt) {
+    return (
+      <ActionSuccessPage
+        title="Transfer successful"
+        description="Your transfer has been completed and both account transaction records have been saved."
+        details={[
+          {
+            label: "Amount",
+            value: new Intl.NumberFormat("en-BD", {
+              style: "currency",
+              currency: "BDT",
+              maximumFractionDigits: 2,
+            }).format(transferReceipt.amount),
+          },
+          {
+            label: "From account",
+            value: transferReceipt.sourceAccountNumber,
+          },
+          {
+            label: "Recipient account",
+            value: transferReceipt.recipientAccountNumber,
+          },
+          { label: "Transaction ID", value: transferReceipt.transactionId },
+        ]}
+        primaryLabel="View my transactions"
+        primaryHref="/dashboard/coustomer/my-tranactions"
+        secondaryHref="/dashboard/coustomer"
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-3xl space-y-6">
@@ -259,11 +299,6 @@ export default function TransferForm({
             {isSubmitting ? "Transferring..." : "Transfer money"}
           </button>
 
-          {result ? (
-            <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
-              {result}
-            </p>
-          ) : null}
           {error ? (
             <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
               {error}

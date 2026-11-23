@@ -7,13 +7,19 @@ import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { getAccountByUserId, type UserAccount } from "@/lib/data";
 import { addTransaction } from "@/lib/action";
+import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 export default function DepositPage() {
   const [amount, setAmount] = useState("");
   const [depositMethod, setDepositMethod] = useState("Cash");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState("");
-  const [submissionSuccess, setSubmissionSuccess] = useState("");
+  const [submissionSuccess, setSubmissionSuccess] = useState<{
+    amount: number;
+    method: string;
+    accountNumber: string;
+    referenceNumber: string;
+  } | null>(null);
   const { data: session, isPending: isSessionPending } = authClient.useSession();
   const userId = session?.user?.id;
   const [ownAccount, setOwnAccount] = useState<UserAccount | null>(null);
@@ -69,11 +75,15 @@ export default function DepositPage() {
 
     setIsSubmitting(true);
     setSubmissionError("");
-    setSubmissionSuccess("");
+    setSubmissionSuccess(null);
     try {
       await addTransaction(depositData);
-      setSubmissionSuccess("Deposit request submitted for staff review.");
-      setAmount("");
+      setSubmissionSuccess({
+        amount: depositData.amount,
+        method: depositData.depositMethod,
+        accountNumber: depositData.accountNumber,
+        referenceNumber: depositData.referenceNumber,
+      });
     } catch (error) {
       setSubmissionError(
         error instanceof Error
@@ -100,6 +110,38 @@ export default function DepositPage() {
     { name: "Bank Transfer", description: "From another bank", icon: Building2 },
     { name: "Mobile Banking", description: "Wallet or mobile app", icon: Smartphone },
   ];
+
+  if (submissionSuccess) {
+    return (
+      <ActionSuccessPage
+        title="Deposit request submitted"
+        description="Your deposit request was saved and sent to staff for review. The balance will update after it is approved."
+        details={[
+          {
+            label: "Amount",
+            value: new Intl.NumberFormat("en-BD", {
+              style: "currency",
+              currency: "BDT",
+              maximumFractionDigits: 2,
+            }).format(submissionSuccess.amount),
+          },
+          { label: "Method", value: submissionSuccess.method },
+          { label: "Account", value: submissionSuccess.accountNumber },
+          ...(submissionSuccess.referenceNumber.trim()
+            ? [
+                {
+                  label: "Reference",
+                  value: submissionSuccess.referenceNumber.trim(),
+                },
+              ]
+            : []),
+        ]}
+        primaryLabel="View my transactions"
+        primaryHref="/dashboard/coustomer/my-tranactions"
+        secondaryHref="/dashboard/coustomer"
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-5xl space-y-7">
@@ -238,12 +280,6 @@ export default function DepositPage() {
               {submissionError}
             </p>
           )}
-          {submissionSuccess && (
-            <p className="text-sm text-green-700" role="status">
-              {submissionSuccess}
-            </p>
-          )}
-
           <div className="flex justify-end border-t border-gray-100 pt-5">
             <Button
               type="submit"
