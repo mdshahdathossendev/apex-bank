@@ -39,7 +39,7 @@ export interface AccountData {
 
 export interface CreateAccountInput extends Omit<
   AccountData,
-  "accountNumber" | "balance"
+  "accountNumber" | "balance" | "name"
 > {
   transactionPin: string;
   transactionPinConfirmation: string;
@@ -68,6 +68,12 @@ export interface CustomerPersonalDataUpdate {
   nidNumber: string;
   presentAddress: string;
   permanentAddress: string;
+}
+
+export interface RegisterCustomerInput {
+  name: string;
+  email: string;
+  password: string;
 }
 
 export type WithdrawalMethod =
@@ -107,12 +113,39 @@ export async function createAccount(
   if (
     !account ||
     typeof account.userId !== "string" ||
-    !account.userId.trim() ||
-    typeof account.name !== "string" ||
-    !account.name.trim()
+    !account.userId.trim()
   ) {
-    throw new Error("A customer and account holder name are required");
+    throw new Error("A customer is required");
   }
+
+  const userIdClauses: Document[] = [
+    { _id: account.userId },
+    { id: account.userId },
+  ];
+  if (ObjectId.isValid(account.userId)) {
+    userIdClauses.push({ _id: new ObjectId(account.userId) });
+  }
+  const customer = await bankingDb.collection("user").findOne(
+    { $or: userIdClauses },
+    { projection: { _id: 1, id: 1, name: 1, role: 1 } },
+  );
+  if (!customer || customer.role !== "customer") {
+    throw new Error("The selected customer was not found");
+  }
+  const customerName =
+    typeof customer.name === "string" ? customer.name.trim() : "";
+  if (!customerName) {
+    throw new Error("The selected customer does not have a name");
+  }
+  const customerId =
+    customer._id instanceof ObjectId
+      ? customer._id.toHexString()
+      : typeof customer._id === "string"
+        ? customer._id
+        : typeof customer.id === "string"
+          ? customer.id
+          : account.userId;
+
   if (!isValidTransactionPin(account.transactionPin)) {
     throw new Error("The transaction PIN must be exactly 4 digits");
   }
@@ -144,8 +177,8 @@ export async function createAccount(
 
   const pinFields = await hashTransactionPin(account.transactionPin);
   const accountFields = {
-    userId: account.userId,
-    name: account.name,
+    userId: customerId,
+    name: customerName,
     fatherName: account.fatherName,
     motherName: account.motherName,
     dateOfBirth: account.dateOfBirth,
@@ -171,6 +204,48 @@ export async function createAccount(
   });
 
   return { accountNumber };
+}
+
+export async function registerCustomer(
+  input: RegisterCustomerInput,
+): Promise<{ customerId: string; email: string }> {
+  const requestHeaders = await headers();
+  const session = await auth.api.getSession({ headers: requestHeaders });
+  if (session?.user.role !== "staff") {
+    throw new Error("Only staff can register customers");
+  }
+  if (!input || typeof input !== "object") {
+    throw new Error("Customer details are required");
+  }
+
+  const name = validateTextField(input.name, "Name", 100, true);
+  const email =
+    typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
+  const password = input.password;
+  if (
+    email.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    throw new Error("Enter a valid email address");
+  }
+  if (
+    typeof password !== "string" ||
+    password.length < 8 ||
+    password.length > 128 ||
+    !/[A-Z]/.test(password) ||
+    !/[0-9]/.test(password)
+  ) {
+    throw new Error(
+      "Password must be 8 to 128 characters and include an uppercase letter and a number",
+    );
+  }
+
+  const result = await auth.api.createUser({
+    body: { name, email, password },
+    headers: requestHeaders,
+  });
+  revalidatePath("/dashboard/staff/all-users");
+  return { customerId: result.user.id, email: result.user.email };
 }
 
 export async function crateAccount(
@@ -318,6 +393,150 @@ export async function updateCustomerPersonalData(
   } finally {
     await dbSession.endSession();
   }
+}
+
+export async function setCustomerBlocked(
+  userId: string,
+  blocked: boolean,
+): Promise<{ blocked: boolean; message: string }> {
+  const requestHeaders = await headers();
+  const session = await auth.api.getSession({ headers: requestHeaders });
+  if (session?.user.role !== "admin") {
+    throw new Error("Only admins can block or unblock customer accounts");
+  }
+  if (typeof userId !== "string" || !userId.trim() || userId.length > 128) {
+    throw new Error("Invalid customer ID");
+  }
+  if (typeof blocked !== "boolean") {
+    throw new Error("A valid customer account status is required");
+  }
+
+  const userIdClauses: Document[] = [{ _id: userId }, { id: userId }];
+  if (ObjectId.isValid(userId)) {
+    userIdClauses.push({ _id: new ObjectId(userId) });
+  }
+  const customer = await bankingDb.collection("user").findOne(
+    { $or: userIdClauses },
+    { projection: { _id: 1, id: 1, role: 1 } },
+  );
+  if (!customer || customer.role !== "customer") {
+    throw new Error("The customer record was not found");
+  }
+
+  const customerId =
+    customer._id instanceof ObjectId
+      ? customer._id.toHexString()
+      : typeof customer._id === "string"
+        ? customer._id
+        : typeof customer.id === "string"
+          ? customer.id
+          : "";
+  if (!customerId) {
+    throw new Error("The customer record has an invalid ID");
+  }
+
+  const result = blocked
+    ? await auth.api.banUser({
+        body: {
+          userId: customerId,
+          banReason: "Blocked by a bank administrator",
+        },
+        headers: requestHeaders,
+      })
+    : await auth.api.unbanUser({
+        body: { userId: customerId },
+        headers: requestHeaders,
+      });
+  if (!result.user) {
+    throw new Error("The customer account status could not be updated");
+  }
+
+  revalidatePath("/dashboard/admin/all-customers");
+  return {
+    blocked,
+    message: blocked
+      ? "Customer account blocked successfully."
+      : "Customer account unblocked successfully.",
+  };
+}
+
+export async function setBankAccountFrozen(
+  accountNumber: string,
+  frozen: boolean,
+): Promise<{ frozen: boolean; message: string }> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "admin") {
+    throw new Error("Only admins can freeze or unfreeze bank accounts");
+  }
+  if (typeof accountNumber !== "string" || !/^\d{10}$/.test(accountNumber)) {
+    throw new Error("Invalid bank account number");
+  }
+  if (typeof frozen !== "boolean") {
+    throw new Error("A valid account status is required");
+  }
+
+  const accountCollection = bankingDb.collection("bank-account");
+  const account = await accountCollection.findOne({ accountNumber });
+  if (!account) throw new Error("Bank account not found");
+
+  const currentStatus = String(
+    account.status ?? account.accountStatus ??
+      (account.isActive === false ? "inactive" : "active"),
+  )
+    .trim()
+    .toLowerCase();
+  if (frozen && currentStatus === "frozen") {
+    return { frozen: true, message: "This account is already frozen." };
+  }
+  if (!frozen && currentStatus !== "frozen") {
+    throw new Error("Only frozen accounts can be unfrozen");
+  }
+  if (frozen && (currentStatus !== "active" || account.isActive === false)) {
+    throw new Error("Only active accounts can be frozen");
+  }
+
+  const changedAt = new Date().toISOString();
+  const freezeFilter: Document = { _id: account._id };
+  if (account.status === undefined) {
+    freezeFilter.status = { $exists: false };
+  } else {
+    freezeFilter.status = account.status;
+  }
+  const result = frozen
+    ? await accountCollection.updateOne(
+        freezeFilter,
+        {
+          $set: {
+            status: "frozen",
+            frozenAt: changedAt,
+            frozenBy: session.user.id,
+          },
+        },
+      )
+    : await accountCollection.updateOne(
+        { _id: account._id, status: "frozen" },
+        {
+          $set: {
+            status: "active",
+            unfrozenAt: changedAt,
+            unfrozenBy: session.user.id,
+          },
+          $unset: { frozenAt: "", frozenBy: "" },
+        },
+      );
+  if (result.matchedCount !== 1) {
+    throw new Error("The account status changed before the update completed");
+  }
+
+  revalidatePath("/dashboard/admin/all-accounts");
+  return {
+    frozen,
+    message: frozen
+      ? "Bank account frozen successfully."
+      : "Bank account unfrozen successfully.",
+  };
 }
 
 const MAX_TRANSFER_CENTS = 2_000_000;
@@ -599,12 +818,51 @@ export async function transferFunds(
 }
 
 export async function addTransaction(data: TransactionRequest): Promise<unknown> {
-  const response = await fetch("http://localhost:4000/api/transactions", {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "customer") {
+    throw new Error("Only customers can submit transaction requests");
+  }
+  if (!data || typeof data !== "object") {
+    throw new Error("Transaction details are required");
+  }
+
+  const accountNumber =
+    typeof data.accountNumber === "string" ? data.accountNumber.trim() : "";
+  const paymentType = String(data.paymentType ?? "").toLowerCase();
+  const amountInCents = toCents(data.amount);
+  if (data.userId !== session.user.id) {
+    throw new Error("You can only submit requests for your own accounts");
+  }
+  if (!/^\d{10}$/.test(accountNumber)) {
+    throw new Error("Select a valid bank account");
+  }
+  if (paymentType !== "deposit" && paymentType !== "withdrawal") {
+    throw new Error("Only deposit and withdrawal requests can be submitted");
+  }
+  if (amountInCents === null || amountInCents <= 0) {
+    throw new Error("Transaction amount must be greater than zero");
+  }
+
+  const account = await bankingDb.collection("bank-account").findOne({
+    accountNumber,
+    userId: session.user.id,
+  });
+  if (!account) throw new Error("The selected bank account was not found");
+  assertAccountIsActive(account, "Your account");
+
+  const response = await fetch("https://bank-server-coral.vercel.app/api/transactions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      ...data,
+      userId: session.user.id,
+      accountNumber,
+      paymentType,
+    }),
   });
 
   if (!response.ok) {
@@ -689,6 +947,7 @@ export async function approveTransaction(
         { session: dbSession },
       );
       if (!account) throw new Error("The linked account was not found");
+      assertAccountIsActive(account, "The linked account");
 
       const currentBalance = await getAccountBalanceInCents(
         account,
@@ -869,6 +1128,9 @@ export async function approveLoanApplication(
             approvedAt: completedAtIso,
             disbursedAmount: amountInCents / 100,
             creditedAccountNumber: accountNumber,
+            repaidAmount: 0,
+            outstandingAmount: amountInCents / 100,
+            repaymentStatus: "unpaid",
           },
         },
         { session: dbSession },
@@ -885,6 +1147,9 @@ export async function approveLoanApplication(
             approvedAt: completedAtIso,
             disbursedAmount: amountInCents / 100,
             creditedAccountNumber: accountNumber,
+            repaidAmount: 0,
+            outstandingAmount: amountInCents / 100,
+            repaymentStatus: "unpaid",
           },
         },
         { session: dbSession },
@@ -1026,6 +1291,14 @@ async function verifyTransactionPin(
 function assertAccountIsActive(account: Document, label: string): void {
   const status = account.status ?? account.accountStatus;
   if (
+    typeof status === "string" &&
+    status.trim().toLowerCase() === "frozen"
+  ) {
+    throw new Error(
+      `${label} is frozen and cannot make or receive transactions`,
+    );
+  }
+  if (
     (status !== undefined &&
       status !== null &&
       String(status).trim().toLowerCase() !== "active") ||
@@ -1096,6 +1369,7 @@ async function getAccountBalanceInCents(
     const paymentType = String(transaction.paymentType ?? "").toLowerCase();
     if (paymentType === "deposit") return balance + transactionAmount;
     if (paymentType === "withdrawal") return balance - transactionAmount;
+    if (paymentType === "loan-repayment") return balance - transactionAmount;
     if (paymentType === "transfer") {
       return transaction.transferDirection === "received"
         ? balance + transactionAmount
@@ -1114,6 +1388,444 @@ export interface LoanApplicationInput {
   employmentStatus: string;
   monthlyIncome: number;
   employerName: string;
+}
+
+export interface CustomerLoanCenterData {
+  loans: {
+    id: string;
+    loanType: string;
+    requestedAmount: number;
+    disbursedAmount: number;
+    termMonths: number;
+    purpose: string;
+    applicationStatus: string;
+    submittedAt: string;
+    creditedAccountNumber: string;
+    repaidAmount: number;
+    outstandingAmount: number;
+  }[];
+  accounts: {
+    accountNumber: string;
+    accountType: string;
+    balance: number;
+  }[];
+}
+
+export async function getCustomerLoanCenterData(): Promise<CustomerLoanCenterData> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "customer") {
+    throw new Error("Only customers can view their loan center");
+  }
+
+  const [loanRecords, accountRecords] = await Promise.all([
+    bankingDb
+      .collection("loan-application")
+      .find({ userId: session.user.id })
+      .sort({ submittedAt: -1, _id: -1 })
+      .toArray(),
+    bankingDb
+      .collection("bank-account")
+      .find({ userId: session.user.id })
+      .project({
+        accountNumber: 1,
+        accountType: 1,
+        balance: 1,
+        initialDeposit: 1,
+        status: 1,
+        accountStatus: 1,
+        isActive: 1,
+      })
+      .toArray(),
+  ]);
+
+  const loans = loanRecords.flatMap((record) => {
+    const id =
+      record._id instanceof ObjectId
+        ? record._id.toHexString()
+        : typeof record._id === "string"
+          ? record._id
+          : "";
+    if (!id) return [];
+
+    const disbursedCents = Math.max(toCents(record.disbursedAmount) ?? 0, 0);
+    const repaidCents = Math.min(
+      disbursedCents,
+      Math.max(toCents(record.repaidAmount) ?? 0, 0),
+    );
+    const submittedAt =
+      record.submittedAt instanceof Date
+        ? record.submittedAt.toISOString()
+        : typeof record.submittedAt === "string"
+          ? record.submittedAt
+          : "";
+
+    return [
+      {
+        id,
+        loanType: typeof record.loanType === "string" ? record.loanType : "Loan",
+        requestedAmount: (toCents(record.requestedAmount) ?? 0) / 100,
+        disbursedAmount: disbursedCents / 100,
+        termMonths:
+          typeof record.termMonths === "number" ? record.termMonths : 0,
+        purpose: typeof record.purpose === "string" ? record.purpose : "",
+        applicationStatus:
+          typeof record.applicationStatus === "string"
+            ? record.applicationStatus
+            : "pending",
+        submittedAt,
+        creditedAccountNumber:
+          typeof record.creditedAccountNumber === "string"
+            ? record.creditedAccountNumber
+            : "",
+        repaidAmount: repaidCents / 100,
+        outstandingAmount: (disbursedCents - repaidCents) / 100,
+      },
+    ];
+  });
+
+  const accounts = accountRecords.flatMap((record) => {
+    const accountNumber =
+      typeof record.accountNumber === "string" ? record.accountNumber : "";
+    const accountStatus = String(
+      record.status ?? record.accountStatus ?? "active",
+    )
+      .trim()
+      .toLowerCase();
+    if (
+      !/^\d{10}$/.test(accountNumber) ||
+      accountStatus !== "active" ||
+      record.isActive === false
+    ) {
+      return [];
+    }
+
+    const balanceCents =
+      toCents(record.balance) ?? toCents(record.initialDeposit) ?? 0;
+    return [
+      {
+        accountNumber,
+        accountType:
+          typeof record.accountType === "string" ? record.accountType : "Bank",
+        balance: Math.max(balanceCents, 0) / 100,
+      },
+    ];
+  });
+
+  return { loans, accounts };
+}
+
+export async function getCustomerAccountStatement(
+  accountNumber: string,
+): Promise<{
+  accountNumber: string;
+  accountType: string;
+  generatedAt: string;
+  transactions: {
+    date: string;
+    direction: string;
+    type: string;
+    description: string;
+    amount: number | null;
+    status: string;
+    reference: string;
+  }[];
+}> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "customer") {
+    throw new Error("Only customers can download account statements");
+  }
+  if (typeof accountNumber !== "string" || !/^\d{10}$/.test(accountNumber)) {
+    throw new Error("Choose a valid bank account");
+  }
+
+  const account = await bankingDb.collection("bank-account").findOne(
+    { userId: session.user.id, accountNumber },
+    { projection: { accountNumber: 1, accountType: 1 } },
+  );
+  if (!account) {
+    throw new Error("The selected account does not belong to your profile");
+  }
+
+  const records = await bankingDb
+    .collection("deposit")
+    .find({ userId: session.user.id, accountNumber })
+    .project({
+      paymentType: 1,
+      transferDirection: 1,
+      amount: 1,
+      description: 1,
+      depositMethod: 1,
+      withdrawalMethod: 1,
+      statuses: 1,
+      status: 1,
+      referenceNumber: 1,
+      transactionId: 1,
+      createdAt: 1,
+      date: 1,
+    })
+    .toArray();
+  const rows = records
+    .map((record) => {
+      const rawDate = record.createdAt ?? record.date;
+      const date =
+        rawDate instanceof Date
+          ? rawDate
+          : typeof rawDate === "string" || typeof rawDate === "number"
+            ? new Date(rawDate)
+            : null;
+      const validDate = date && !Number.isNaN(date.getTime()) ? date : null;
+      const paymentType =
+        typeof record.paymentType === "string"
+          ? record.paymentType.toLowerCase()
+          : "";
+      const transferDirection =
+        typeof record.transferDirection === "string"
+          ? record.transferDirection.toLowerCase()
+          : "";
+      const direction =
+        paymentType === "transfer"
+          ? transferDirection === "received"
+            ? "Credit"
+            : transferDirection === "sent"
+              ? "Debit"
+              : "Activity"
+          : paymentType === "deposit"
+            ? "Credit"
+            : paymentType.includes("withdraw") ||
+                paymentType === "loan-repayment"
+              ? "Debit"
+              : "Activity";
+      const type =
+        paymentType === "transfer"
+          ? `Transfer ${transferDirection || "activity"}`
+          : paymentType === "loan-repayment"
+            ? "Loan repayment"
+            : paymentType.replace(/-/g, " ") || "Transaction";
+      const description =
+        typeof record.description === "string"
+          ? record.description
+          : typeof record.depositMethod === "string"
+            ? record.depositMethod
+            : typeof record.withdrawalMethod === "string"
+              ? record.withdrawalMethod
+              : "";
+      const amountInCents = toCents(record.amount);
+      const status =
+        typeof record.statuses === "string"
+          ? record.statuses
+          : typeof record.status === "string"
+            ? record.status
+            : "Unknown";
+      const reference =
+        typeof record.referenceNumber === "string"
+          ? record.referenceNumber
+          : typeof record.transactionId === "string"
+            ? record.transactionId
+            : record._id instanceof ObjectId
+              ? record._id.toHexString()
+              : "";
+
+      return {
+        timestamp: validDate?.getTime() ?? 0,
+        transaction: {
+          date: validDate?.toISOString() ?? "",
+          direction,
+          type,
+          description,
+          amount:
+            amountInCents === null ? null : Math.abs(amountInCents) / 100,
+          status,
+          reference,
+        },
+      };
+    })
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const accountType =
+    typeof account.accountType === "string" ? account.accountType : "Bank";
+
+  return {
+    accountNumber,
+    accountType,
+    generatedAt: new Date().toISOString(),
+    transactions: rows.map((row) => row.transaction),
+  };
+}
+
+export async function repayLoan(
+  loanId: string,
+  accountNumber: string,
+  amount: number | string,
+): Promise<{
+  transactionId: string;
+  amount: number;
+  repaidAmount: number;
+  outstandingAmount: number;
+  message: string;
+}> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "customer") {
+    throw new Error("Only customers can repay loans");
+  }
+  if (!ObjectId.isValid(loanId)) {
+    throw new Error("Invalid loan application ID");
+  }
+  if (typeof accountNumber !== "string" || !/^\d{10}$/.test(accountNumber)) {
+    throw new Error("Select a valid bank account for repayment");
+  }
+
+  const amountInCents = toCents(amount);
+  if (amountInCents === null || amountInCents <= 0) {
+    throw new Error("Enter a repayment amount greater than zero");
+  }
+
+  const loanObjectId = new ObjectId(loanId);
+  const loanCollection = bankingDb.collection("loan-application");
+  const accountCollection = bankingDb.collection("bank-account");
+  const transactionCollection = bankingDb.collection("deposit");
+  const dbSession = mongoClient.startSession();
+  const transactionId = randomUUID();
+
+  try {
+    const outcome = await dbSession.withTransaction(async () => {
+      const loan = await loanCollection.findOne(
+        { _id: loanObjectId, userId: session.user.id },
+        { session: dbSession },
+      );
+      if (!loan) throw new Error("Loan application was not found");
+      if (
+        String(loan.applicationStatus ?? "").toLowerCase() !== "success"
+      ) {
+        throw new Error("Only approved and disbursed loans can be repaid");
+      }
+
+      const disbursedCents = toCents(loan.disbursedAmount);
+      if (disbursedCents === null || disbursedCents <= 0) {
+        throw new Error("The loan has no recorded disbursement to repay");
+      }
+      const previousRepaidCents =
+        loan.repaidAmount === undefined ? 0 : toCents(loan.repaidAmount);
+      if (
+        previousRepaidCents === null ||
+        previousRepaidCents < 0 ||
+        previousRepaidCents > disbursedCents
+      ) {
+        throw new Error("The loan has an invalid repayment balance");
+      }
+      const outstandingCents = disbursedCents - previousRepaidCents;
+      if (outstandingCents <= 0) {
+        throw new Error("This loan has already been fully repaid");
+      }
+      if (amountInCents > outstandingCents) {
+        throw new Error("Repayment cannot exceed the outstanding loan amount");
+      }
+
+      const account = await accountCollection.findOne(
+        { accountNumber, userId: session.user.id },
+        { session: dbSession },
+      );
+      if (!account) throw new Error("The selected bank account was not found");
+      assertAccountIsActive(account, "The selected account");
+
+      const currentBalance = await getAccountBalanceInCents(
+        account,
+        accountNumber,
+        transactionCollection,
+        dbSession,
+      );
+      if (currentBalance < amountInCents) {
+        throw new Error("Insufficient balance for this loan repayment");
+      }
+
+      const nextBalance = currentBalance - amountInCents;
+      const nextRepaidCents = previousRepaidCents + amountInCents;
+      const nextOutstandingCents = outstandingCents - amountInCents;
+      const paidAt = new Date();
+      const paidAtIso = paidAt.toISOString();
+
+      const accountUpdate = await accountCollection.updateOne(
+        { _id: account._id },
+        { $set: { balance: nextBalance / 100, balanceUpdatedAt: paidAt } },
+        { session: dbSession },
+      );
+      if (accountUpdate.matchedCount !== 1) {
+        throw new Error("Bank account balance could not be updated");
+      }
+
+      const loanUpdateFilter: Document = {
+        _id: loanObjectId,
+        userId: session.user.id,
+        applicationStatus: loan.applicationStatus,
+      };
+      if (loan.repaidAmount === undefined) {
+        loanUpdateFilter.repaidAmount = { $exists: false };
+      } else {
+        loanUpdateFilter.repaidAmount = loan.repaidAmount;
+      }
+      const loanUpdate = await loanCollection.updateOne(
+        loanUpdateFilter,
+        {
+          $set: {
+            repaidAmount: nextRepaidCents / 100,
+            outstandingAmount: nextOutstandingCents / 100,
+            repaymentStatus: nextOutstandingCents === 0 ? "paid" : "partial",
+            lastRepaymentAt: paidAtIso,
+          },
+        },
+        { session: dbSession },
+      );
+      if (loanUpdate.matchedCount !== 1) {
+        throw new Error("Loan balance changed before repayment could complete");
+      }
+
+      const transactionInsert = await transactionCollection.insertOne(
+        {
+          transactionId,
+          userId: session.user.id,
+          accountNumber,
+          paymentType: "loan-repayment",
+          withdrawalMethod: "Loan repayment",
+          description: `${String(loan.loanType ?? "Loan")} repayment`,
+          referenceNumber: transactionId,
+          loanApplicationId: loanId,
+          amount: amountInCents / 100,
+          statuses: "success",
+          createdAt: paidAtIso,
+          completedAt: paidAtIso,
+        },
+        { session: dbSession },
+      );
+      if (!transactionInsert.acknowledged) {
+        throw new Error("Loan repayment transaction could not be recorded");
+      }
+
+      return {
+        amount: amountInCents / 100,
+        repaidAmount: nextRepaidCents / 100,
+        outstandingAmount: nextOutstandingCents / 100,
+      };
+    });
+
+    if (!outcome) throw new Error("Loan repayment did not complete");
+    revalidatePath("/dashboard/coustomer/lone");
+    revalidatePath("/dashboard/coustomer/my-tranactions");
+    revalidatePath("/dashboard/coustomer/my-account");
+    revalidatePath("/dashboard/coustomer");
+    return {
+      ...outcome,
+      transactionId,
+      message: outcome.outstandingAmount === 0
+        ? "Loan fully repaid."
+        : "Loan repayment completed.",
+    };
+  } finally {
+    await dbSession.endSession();
+  }
 }
 
 export async function loneRequest(
@@ -1146,7 +1858,7 @@ export async function loneRequest(
   }
 
   const response = await fetch(
-    "http://localhost:4000/api/loan-application-staff",
+    "https://bank-server-coral.vercel.app/api/loan-application-staff",
     {
       method: "POST",
       headers: {
@@ -1206,7 +1918,7 @@ export interface LoanApplicationAdminNote {
 }
 
 export async function loneRequestAdmin(data: LoanApplicationAdminNote): Promise<unknown> {
-    const response = await fetch("http://localhost:4000/api/loan-application-admin", { 
+    const response = await fetch("https://bank-server-coral.vercel.app/api/loan-application-admin", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

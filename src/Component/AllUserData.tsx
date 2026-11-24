@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Search, Users } from "lucide-react";
+import { LockKeyhole, Search, UnlockKeyhole, Users } from "lucide-react";
+import { setCustomerBlocked } from "@/lib/action";
 
 interface CustomerRecord extends Record<string, unknown> {
   _id?: unknown;
@@ -12,6 +13,7 @@ interface CustomerRecord extends Record<string, unknown> {
   role?: unknown;
   emailVerified?: unknown;
   createdAt?: unknown;
+  banned?: unknown;
 }
 
 function isCustomerRecord(value: unknown): value is CustomerRecord {
@@ -57,6 +59,14 @@ export function AllUserData({
   dashboardBase?: "staff" | "admin";
 }) {
   const [search, setSearch] = useState("");
+  const [blockedOverrides, setBlockedOverrides] = useState<
+    Record<string, boolean>
+  >({});
+  const [updatingCustomerId, setUpdatingCustomerId] = useState<string | null>(
+    null,
+  );
+  const [accessMessage, setAccessMessage] = useState("");
+  const [accessError, setAccessError] = useState("");
   const users = Array.isArray(data) ? data.filter(isCustomerRecord) : [];
   const customers = users.filter((user) => {
     const role = text(user.role).toLowerCase();
@@ -73,6 +83,25 @@ export function AllUserData({
       .toLowerCase()
       .includes(query),
   );
+
+  async function toggleCustomerAccess(id: string, blocked: boolean) {
+    setUpdatingCustomerId(id);
+    setAccessMessage("");
+    setAccessError("");
+    try {
+      const result = await setCustomerBlocked(id, blocked);
+      setBlockedOverrides((current) => ({ ...current, [id]: result.blocked }));
+      setAccessMessage(result.message);
+    } catch (error) {
+      setAccessError(
+        error instanceof Error
+          ? error.message
+          : "The customer account status could not be updated.",
+      );
+    } finally {
+      setUpdatingCustomerId(null);
+    }
+  }
 
   return (
     <main className="mx-auto max-w-7xl space-y-6">
@@ -122,6 +151,18 @@ export function AllUserData({
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        {accessMessage || accessError ? (
+          <p
+            role={accessError ? "alert" : "status"}
+            className={`border-b px-5 py-3 text-sm ${
+              accessError
+                ? "border-red-100 bg-red-50 text-red-700"
+                : "border-emerald-100 bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {accessError || accessMessage}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 p-5 sm:p-6">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
@@ -163,13 +204,20 @@ export function AllUserData({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table
+              className={`w-full text-left text-sm ${
+                dashboardBase === "admin" ? "min-w-[1000px]" : "min-w-[900px]"
+              }`}
+            >
               <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                 <tr>
                   <th className="px-5 py-4 font-semibold">Customer</th>
                   <th className="px-5 py-4 font-semibold">Email</th>
                   <th className="px-5 py-4 font-semibold">Joined</th>
                   <th className="px-5 py-4 font-semibold">Verification</th>
+                  {dashboardBase === "admin" ? (
+                    <th className="px-5 py-4 font-semibold">Access</th>
+                  ) : null}
                   <th className="px-5 py-4 text-right font-semibold">
                     Actions
                   </th>
@@ -182,6 +230,8 @@ export function AllUserData({
                   const email = text(customer.email) || "Email unavailable";
                   const key = id || email || `${name}-${index}`;
                   const isVerified = customer.emailVerified === true;
+                  const isBlocked =
+                    blockedOverrides[id] ?? customer.banned === true;
 
                   return (
                     <tr key={key} className="transition hover:bg-gray-50/80">
@@ -208,6 +258,19 @@ export function AllUserData({
                           {isVerified ? "Verified" : "Not verified"}
                         </span>
                       </td>
+                      {dashboardBase === "admin" ? (
+                        <td className="px-5 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-medium ${
+                              isBlocked
+                                ? "bg-red-50 text-red-700"
+                                : "bg-emerald-50 text-emerald-700"
+                            }`}
+                          >
+                            {isBlocked ? "Blocked" : "Unblocked"}
+                          </span>
+                        </td>
+                      ) : null}
                       <td className="px-5 py-4">
                         <div className="flex justify-end gap-2">
                           {id ? (
@@ -226,6 +289,33 @@ export function AllUserData({
                               >
                                 Edit details
                               </Link>
+                              {dashboardBase === "admin" ? (
+                                <button
+                                  type="button"
+                                  disabled={updatingCustomerId !== null}
+                                  onClick={() =>
+                                    void toggleCustomerAccess(id, !isBlocked)
+                                  }
+                                  className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                    isBlocked
+                                      ? "border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                      : "border border-red-200 text-red-700 hover:bg-red-50"
+                                  }`}
+                                >
+                                  {isBlocked ? (
+                                    <UnlockKeyhole size={14} aria-hidden="true" />
+                                  ) : (
+                                    <LockKeyhole size={14} aria-hidden="true" />
+                                  )}
+                                  {updatingCustomerId === id
+                                    ? isBlocked
+                                      ? "Unblocking..."
+                                      : "Blocking..."
+                                    : isBlocked
+                                      ? "Unblock"
+                                      : "Block"}
+                                </button>
+                              ) : null}
                               {dashboardBase === "staff" ? (
                                 <Link
                                   href={`/dashboard/staff/create-accounet?customerId=${encodeURIComponent(id)}`}

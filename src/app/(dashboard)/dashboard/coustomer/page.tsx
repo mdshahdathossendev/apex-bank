@@ -9,6 +9,7 @@ import {
   HandCoins,
   Wallet,
 } from "lucide-react";
+import CustomerStatementDownload from "@/Component/CustomerStatementDownload";
 import { authClient } from "@/lib/auth-client";
 import {
   getCustomerAccountsByUserId,
@@ -24,7 +25,9 @@ function getTransactionKind(
 ): TransactionKind {
   const type = transaction.paymentType?.toLowerCase() ?? "";
   if (type.includes("deposit")) return "deposit";
-  if (type.includes("withdraw")) return "withdrawal";
+  if (type.includes("withdraw") || type === "loan-repayment") {
+    return "withdrawal";
+  }
   if (type.includes("transfer")) return "transfer";
   return "other";
 }
@@ -114,46 +117,50 @@ function statusClass(status: string): string {
 export default function CustomerDashboard() {
   const { data: session, isPending: isSessionPending } = authClient.useSession();
   const userId = session?.user?.id;
-  const [accounts, setAccounts] = useState<CustomerAccountSummary[]>([]);
-  const [transactions, setTransactions] = useState<
-    CustomerTransactionSummary[]
-  >([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [dashboardResult, setDashboardResult] = useState<{
+    userId: string;
+    accounts: CustomerAccountSummary[];
+    transactions: CustomerTransactionSummary[];
+    error: string;
+  } | null>(null);
+  const currentDashboardResult =
+    dashboardResult?.userId === userId ? dashboardResult : null;
+  const accounts = currentDashboardResult?.accounts ?? [];
+  const transactions = currentDashboardResult?.transactions ?? [];
+  const isLoading =
+    isSessionPending || Boolean(userId && !currentDashboardResult);
+  const error = currentDashboardResult?.error ?? "";
 
   useEffect(() => {
-    if (!userId) {
-      setAccounts([]);
-      setTransactions([]);
-      setIsLoading(isSessionPending);
-      return;
-    }
+    if (!userId) return;
 
     let active = true;
-    setIsLoading(true);
-    setError("");
-
     Promise.all([
       getCustomerAccountsByUserId(userId),
       getCustomerTransactionsByUserId(userId),
     ])
       .then(([customerAccounts, customerTransactions]) => {
         if (!active) return;
-        setAccounts(customerAccounts);
-        setTransactions(customerTransactions);
+        setDashboardResult({
+          userId,
+          accounts: customerAccounts,
+          transactions: customerTransactions,
+          error: "",
+        });
       })
       .catch((loadError: unknown) => {
         if (active) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Could not load your dashboard data",
-          );
+          setDashboardResult({
+            userId,
+            accounts: [],
+            transactions: [],
+            error:
+              loadError instanceof Error
+                ? loadError.message
+                : "Could not load your dashboard data",
+          });
         }
       })
-      .finally(() => {
-        if (active) setIsLoading(false);
-      });
 
     return () => {
       active = false;
@@ -253,6 +260,8 @@ export default function CustomerDashboard() {
           </article>
         ))}
       </section>
+
+      <CustomerStatementDownload accounts={accounts} isLoading={isLoading} />
 
       {error && (
         <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">

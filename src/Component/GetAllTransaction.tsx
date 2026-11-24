@@ -73,7 +73,7 @@ function amountValue(value: unknown): number | null {
 function transactionType(transaction: TransactionRecord): Exclude<TransactionType, "all"> | "other" {
   const type = (text(transaction.paymentType) || text(transaction.type)).toLowerCase();
   if (type.includes("deposit")) return "deposit";
-  if (type.includes("withdraw")) return "withdrawal";
+  if (type.includes("withdraw") || type === "loan-repayment") return "withdrawal";
   if (type.includes("transfer")) return "transfer";
   return "other";
 }
@@ -585,6 +585,9 @@ export default function GetAllTransactions({
               <tbody className="divide-y divide-gray-100">
                 {filteredTransactions.map((transaction, index) => {
                   const kind = transactionType(transaction);
+                  const isLoanRepayment =
+                    text(transaction.paymentType).toLowerCase() ===
+                    "loan-repayment";
                   const isDeposit = kind === "deposit";
                   const direction = text(transaction.transferDirection);
                   const isIncoming =
@@ -619,7 +622,11 @@ export default function GetAllTransactions({
                           </span>
                           <div>
                             <p className="font-semibold capitalize text-gray-900">
-                              {kind === "other" ? "Transaction" : kind}
+                              {isLoanRepayment
+                                ? "Loan repayment"
+                                : kind === "other"
+                                  ? "Transaction"
+                                  : kind}
                               {kind === "transfer"
                                 ? direction === "received"
                                   ? " · received"
@@ -627,7 +634,7 @@ export default function GetAllTransactions({
                                     ? " · sent"
                                     : ""
                                 : ""}
-                              {method ? ` · ${method}` : ""}
+                              {method && !isLoanRepayment ? ` · ${method}` : ""}
                             </p>
                             {text(transaction.description) ? (
                               <p className="mt-1 max-w-xs truncate text-xs text-gray-500">

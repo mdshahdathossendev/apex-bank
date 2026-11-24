@@ -6,13 +6,21 @@ import {
   ArrowRight,
   BriefcaseBusiness,
   CalendarClock,
+  ChevronDown,
+  ChevronUp,
   HandCoins,
   ShieldCheck,
   UserRound,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
-import { loneRequest, type LoanApplicationInput } from "@/lib/action";
+import {
+  getCustomerLoanCenterData,
+  loneRequest,
+  repayLoan,
+  type CustomerLoanCenterData,
+  type LoanApplicationInput,
+} from "@/lib/action";
 import ActionSuccessPage from "@/Component/ActionSuccessPage";
 
 const loanTypes = [
@@ -32,6 +40,22 @@ const employmentStatuses = [
 
 type LoanType = (typeof loanTypes)[number];
 type EmploymentStatus = (typeof employmentStatuses)[number];
+type CustomerLoanHistory = CustomerLoanCenterData["loans"][number];
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-BD", {
+    style: "currency",
+    currency: "BDT",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatSubmittedAt(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Date unavailable"
+    : new Intl.DateTimeFormat("en-BD", { dateStyle: "medium" }).format(date);
+}
 
 export default function LoanApplicationPage() {
   const { data: session, isPending } = authClient.useSession();
@@ -44,10 +68,49 @@ export default function LoanApplicationPage() {
   const [monthlyIncome, setMonthlyIncome] = useState("");
   const [employerName, setEmployerName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loanCenterData, setLoanCenterData] =
+    useState<CustomerLoanCenterData | null>(null);
+  const [isLoadingLoanHistory, setIsLoadingLoanHistory] = useState(true);
+  const [loanHistoryError, setLoanHistoryError] = useState("");
+  const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
+  const [repaymentAccountNumber, setRepaymentAccountNumber] = useState("");
+  const [repaymentAmount, setRepaymentAmount] = useState("");
+  const [repayingLoanId, setRepayingLoanId] = useState<string | null>(null);
+  const [repaymentFeedback, setRepaymentFeedback] = useState<{
+    loanId: string;
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [message, setMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    let active = true;
+    getCustomerLoanCenterData()
+      .then((data) => {
+        if (active) setLoanCenterData(data);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setLoanHistoryError(
+            error instanceof Error
+              ? error.message
+              : "Could not load your loan history.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingLoanHistory(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -70,26 +133,96 @@ export default function LoanApplicationPage() {
       employerName: employerName.trim(),
     };
 
-  setIsSubmitting(true);
-  setMessage(null);
-  try {
-    await loneRequest(applicationData);
-    setMessage({
-      type: "success",
-      text: "Your loan application was submitted successfully.",
-    });
-  } catch (error) {
-    setMessage({
-      type: "error",
-      text:
-        error instanceof Error
-          ? error.message
-          : "Could not submit your loan application.",
-    });
-  } finally {
-    setIsSubmitting(false);
-  }
-}
+    setIsSubmitting(true);
+    setMessage(null);
+    try {
+      await loneRequest(applicationData);
+      setMessage({
+        type: "success",
+        text: "Your loan application was submitted successfully.",
+      });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Could not submit your loan application.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRepayment = async (
+    event: FormEvent<HTMLFormElement>,
+    loan: CustomerLoanHistory,
+  ) => {
+    event.preventDefault();
+    const sourceAccountNumber =
+      repaymentAccountNumber ||
+      loanCenterData?.accounts[0]?.accountNumber ||
+      "";
+    if (!sourceAccountNumber) {
+      setRepaymentFeedback({
+        loanId: loan.id,
+        type: "error",
+        text: "You need an active bank account to repay this loan.",
+      });
+      return;
+    }
+
+    setRepayingLoanId(loan.id);
+    setRepaymentFeedback(null);
+    try {
+      const result = await repayLoan(
+        loan.id,
+        sourceAccountNumber,
+        repaymentAmount,
+      );
+      setLoanCenterData((current) =>
+        current
+          ? {
+              ...current,
+              loans: current.loans.map((item) =>
+                item.id === loan.id
+                  ? {
+                      ...item,
+                      repaidAmount: result.repaidAmount,
+                      outstandingAmount: result.outstandingAmount,
+                    }
+                  : item,
+              ),
+              accounts: current.accounts.map((account) =>
+                account.accountNumber === sourceAccountNumber
+                  ? {
+                      ...account,
+                      balance: Math.max(0, account.balance - result.amount),
+                    }
+                  : account,
+              ),
+            }
+          : current,
+      );
+      setRepaymentAmount("");
+      setRepaymentFeedback({
+        loanId: loan.id,
+        type: "success",
+        text: `${result.message} Remaining principal: ${formatCurrency(result.outstandingAmount)}. Ref: ${result.transactionId}`,
+      });
+    } catch (error) {
+      setRepaymentFeedback({
+        loanId: loan.id,
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Loan repayment could not be completed.",
+      });
+    } finally {
+      setRepayingLoanId(null);
+    }
+  };
 
   const numericAmount = Number(amount);
   const formattedAmount =
@@ -132,10 +265,10 @@ export default function LoanApplicationPage() {
                 APEX BANK · LOAN CENTER
               </p>
               <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
-                Apply for a loan
+                Your loan center
               </h1>
               <p className="mt-1 text-sm text-white/75">
-                Tell us a little about your plans and financing needs.
+                Review previous applications, repay a loan, or apply for another.
               </p>
             </div>
           </div>
@@ -146,11 +279,347 @@ export default function LoanApplicationPage() {
         </div>
       </header>
 
+      <section
+        aria-label="Loan history and repayments"
+        className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6"
+      >
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">
+            Previous loan applications
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Select an approved loan to see its outstanding balance and repayment options.
+          </p>
+        </div>
+
+        {loanHistoryError ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700"
+          >
+            {loanHistoryError}
+          </p>
+        ) : null}
+        {!isPending && !session?.user?.id ? (
+          <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+            Sign in to view your previous loan applications.
+          </p>
+        ) : null}
+        {isLoadingLoanHistory && session?.user?.id ? (
+          <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+            Loading your loan history...
+          </p>
+        ) : null}
+        {!isLoadingLoanHistory &&
+        !loanHistoryError &&
+        loanCenterData?.loans.length === 0 ? (
+          <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+            You do not have previous loan applications.
+          </p>
+        ) : null}
+        {loanCenterData?.loans.map((loan) => {
+          const isExpanded = expandedLoanId === loan.id;
+          const loanStatus = loan.applicationStatus.toLowerCase();
+          const isApproved =
+            loanStatus === "success" || loanStatus === "approved";
+          const hasDisbursement = loan.disbursedAmount > 0;
+          const canRepay =
+            isApproved && hasDisbursement && loan.outstandingAmount > 0;
+          const selectedAccountNumber =
+            repaymentAccountNumber ||
+            loanCenterData.accounts[0]?.accountNumber ||
+            "";
+          const selectedAccount = loanCenterData.accounts.find(
+            (account) => account.accountNumber === selectedAccountNumber,
+          );
+          const numericRepaymentAmount = Number(repaymentAmount);
+          const hasValidRepaymentAmount =
+            Number.isFinite(numericRepaymentAmount) &&
+            numericRepaymentAmount > 0 &&
+            numericRepaymentAmount <= loan.outstandingAmount;
+          const hasEnoughFunds =
+            selectedAccount !== undefined &&
+            numericRepaymentAmount <= selectedAccount.balance;
+          const remainingAfterPayment = hasValidRepaymentAmount
+            ? Math.max(0, loan.outstandingAmount - numericRepaymentAmount)
+            : loan.outstandingAmount;
+          const feedback =
+            repaymentFeedback?.loanId === loan.id ? repaymentFeedback : null;
+
+          return (
+            <article
+              key={loan.id}
+              className="overflow-hidden rounded-xl border border-gray-200"
+            >
+              <button
+                type="button"
+                aria-expanded={isExpanded}
+                onClick={() => {
+                  setExpandedLoanId(isExpanded ? null : loan.id);
+                  setRepaymentAmount("");
+                  setRepaymentAccountNumber("");
+                  setRepaymentFeedback(null);
+                }}
+                className="flex w-full flex-wrap items-center justify-between gap-4 p-4 text-left transition hover:bg-gray-50"
+              >
+                <span>
+                  <span className="block font-semibold text-gray-900">
+                    {loan.loanType}
+                  </span>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    Applied {formatSubmittedAt(loan.submittedAt)} · Requested{" "}
+                    {formatCurrency(loan.requestedAmount)}
+                  </span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
+                      isApproved
+                        ? "bg-emerald-50 text-emerald-700"
+                        : loanStatus === "pending"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {loan.applicationStatus}
+                  </span>
+                  {isExpanded ? (
+                    <ChevronUp aria-hidden="true" size={18} />
+                  ) : (
+                    <ChevronDown aria-hidden="true" size={18} />
+                  )}
+                </span>
+              </button>
+
+              {isExpanded ? (
+                <div className="space-y-4 border-t border-gray-100 bg-gray-50/70 p-4">
+                  <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-lg bg-white p-3">
+                      <dt className="text-xs text-gray-500">Disbursed</dt>
+                      <dd className="mt-1 font-semibold text-gray-900">
+                        {formatCurrency(loan.disbursedAmount)}
+                      </dd>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <dt className="text-xs text-gray-500">Repaid</dt>
+                      <dd className="mt-1 font-semibold text-gray-900">
+                        {formatCurrency(loan.repaidAmount)}
+                      </dd>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <dt className="text-xs text-gray-500">
+                        Outstanding principal
+                      </dt>
+                      <dd className="mt-1 font-semibold text-gray-900">
+                        {formatCurrency(loan.outstandingAmount)}
+                      </dd>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <dt className="text-xs text-gray-500">Loan account</dt>
+                      <dd className="mt-1 font-semibold text-gray-900">
+                        {loan.creditedAccountNumber || "Not recorded"}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {feedback ? (
+                    <p
+                      role={feedback.type === "error" ? "alert" : "status"}
+                      className={`rounded-lg p-3 text-sm ${
+                        feedback.type === "error"
+                          ? "bg-red-50 text-red-700"
+                          : "bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {feedback.text}
+                    </p>
+                  ) : null}
+
+                  {canRepay ? (
+                    <form
+                      onSubmit={(event) => void handleRepayment(event, loan)}
+                      className="space-y-4 rounded-xl border border-blue-100 bg-white p-4 sm:p-5"
+                    >
+                      <div className="flex flex-col justify-between gap-2 rounded-lg bg-blue-50 p-4 sm:flex-row sm:items-center">
+                        <div>
+                          <p className="text-sm font-medium text-blue-900">
+                            Remaining loan amount
+                          </p>
+                          <p className="mt-1 text-2xl font-bold text-blue-950">
+                            {formatCurrency(loan.outstandingAmount)}
+                          </p>
+                        </div>
+                        <p className="max-w-md text-sm leading-5 text-blue-800">
+                          You can repay any amount up to this balance. There is
+                          no fixed installment amount.
+                        </p>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5 text-sm font-medium text-gray-700">
+                          Pay from account
+                          <select
+                            required
+                            value={selectedAccountNumber}
+                            onChange={(event) =>
+                              setRepaymentAccountNumber(event.target.value)
+                            }
+                            disabled={loanCenterData.accounts.length === 0}
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5"
+                          >
+                            {loanCenterData.accounts.length === 0 ? (
+                              <option value="">No active accounts</option>
+                            ) : (
+                              loanCenterData.accounts.map((account) => (
+                                <option
+                                  key={account.accountNumber}
+                                  value={account.accountNumber}
+                                >
+                                  {account.accountNumber} · {account.accountType} ·{" "}
+                                  {formatCurrency(account.balance)}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          {selectedAccount ? (
+                            <span className="block text-xs font-normal text-gray-500">
+                              Available balance:{" "}
+                              {formatCurrency(selectedAccount.balance)}
+                            </span>
+                          ) : null}
+                        </label>
+                        <div className="space-y-1.5">
+                          <label
+                            htmlFor={`repayment-amount-${loan.id}`}
+                            className="block text-sm font-medium text-gray-700"
+                          >
+                            Amount to repay (BDT)
+                          </label>
+                          <Input
+                            id={`repayment-amount-${loan.id}`}
+                            aria-label="Loan repayment amount"
+                            className="w-full"
+                            min="0.01"
+                            max={loan.outstandingAmount}
+                            name="repaymentAmount"
+                            required
+                            step="0.01"
+                            type="number"
+                            value={repaymentAmount}
+                            onChange={(event) =>
+                              setRepaymentAmount(event.target.value)
+                            }
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRepaymentAmount(
+                                loan.outstandingAmount.toFixed(2),
+                              )
+                            }
+                            className="text-xs font-semibold text-blue-700 hover:text-blue-900"
+                          >
+                            Repay full remaining amount
+                          </button>
+                        </div>
+                      </div>
+
+                      {hasValidRepaymentAmount ? (
+                        <div
+                          className={`grid gap-3 rounded-lg border p-3 text-sm sm:grid-cols-2 ${
+                            hasEnoughFunds
+                              ? "border-gray-200 bg-gray-50"
+                              : "border-red-200 bg-red-50"
+                          }`}
+                          aria-live="polite"
+                        >
+                          <p>
+                            <span className="block text-gray-500">
+                              You will pay
+                            </span>
+                            <span className="font-semibold text-gray-900">
+                              {formatCurrency(numericRepaymentAmount)}
+                            </span>
+                          </p>
+                          <p>
+                            <span className="block text-gray-500">
+                              Loan balance after payment
+                            </span>
+                            <span className="font-semibold text-gray-900">
+                              {formatCurrency(remainingAfterPayment)}
+                            </span>
+                          </p>
+                          {!hasEnoughFunds ? (
+                            <p className="font-medium text-red-700 sm:col-span-2">
+                              This account does not have enough balance for
+                              this repayment.
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : repaymentAmount ? (
+                        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                          Enter an amount greater than 0 and no more than{" "}
+                          {formatCurrency(loan.outstandingAmount)}.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-gray-500">
+                          Enter an amount to see how much will remain after
+                          repayment.
+                        </p>
+                      )}
+
+                      <Button
+                        type="submit"
+                        isDisabled={
+                          !selectedAccountNumber ||
+                          !hasValidRepaymentAmount ||
+                          !hasEnoughFunds ||
+                          repayingLoanId !== null ||
+                          loan.outstandingAmount <= 0
+                        }
+                        className="w-full rounded-lg bg-blue-700 px-5 py-2.5 font-semibold text-white hover:bg-blue-800 sm:w-auto"
+                      >
+                        {repayingLoanId === loan.id
+                          ? "Processing..."
+                          : hasValidRepaymentAmount
+                            ? `Repay ${formatCurrency(numericRepaymentAmount)}`
+                            : "Repay loan"}
+                      </Button>
+                    </form>
+                  ) : isApproved && hasDisbursement ? (
+                    <p className="rounded-lg bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
+                      This loan has been fully repaid.
+                    </p>
+                  ) : isApproved ? (
+                    <p className="rounded-lg bg-gray-100 p-3 text-sm text-gray-600">
+                      No loan disbursement is recorded for repayment.
+                    </p>
+                  ) : (
+                    <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                      Repayment becomes available after the loan is approved and
+                      disbursed.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </section>
+
       <div className="grid items-start gap-6 lg:grid-cols-[1fr_320px]">
         <form
           onSubmit={handleSubmit}
           className="space-y-7 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7"
         >
+          <section className="rounded-xl bg-blue-50 p-4">
+            <h2 className="font-semibold text-blue-900">
+              Apply for another loan
+            </h2>
+            <p className="mt-1 text-sm text-blue-800">
+              You can submit a new application while keeping your previous loan history.
+            </p>
+          </section>
           <section className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="rounded-xl bg-blue-50 p-2.5 text-blue-700">

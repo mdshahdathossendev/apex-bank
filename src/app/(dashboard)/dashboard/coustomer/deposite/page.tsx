@@ -22,36 +22,38 @@ export default function DepositPage() {
   } | null>(null);
   const { data: session, isPending: isSessionPending } = authClient.useSession();
   const userId = session?.user?.id;
-  const [ownAccount, setOwnAccount] = useState<UserAccount | null>(null);
-  const [isAccountLoading, setIsAccountLoading] = useState(false);
-  const [accountError, setAccountError] = useState("");
+  const [accountResult, setAccountResult] = useState<{
+    userId: string;
+    account: UserAccount | null;
+    error: string;
+  } | null>(null);
+  const currentAccountResult =
+    accountResult?.userId === userId ? accountResult : null;
+  const ownAccount = currentAccountResult?.account ?? null;
+  const accountError = currentAccountResult?.error ?? "";
+  const isAccountLoading =
+    isSessionPending || Boolean(userId && !currentAccountResult);
 
   useEffect(() => {
-    if (!userId) {
-      setOwnAccount(null);
-      setIsAccountLoading(false);
-      return;
-    }
+    if (!userId) return;
 
     let active = true;
-    setOwnAccount(null);
-    setIsAccountLoading(true);
-    setAccountError("");
-
     getAccountByUserId(userId)
       .then((account) => {
-        if (active) setOwnAccount(account);
+        if (active) setAccountResult({ userId, account, error: "" });
       })
       .catch((error: unknown) => {
         if (active) {
-          setAccountError(
-            error instanceof Error ? error.message : "Could not load your account",
-          );
+          setAccountResult({
+            userId,
+            account: null,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not load your account",
+          });
         }
       })
-      .finally(() => {
-        if (active) setIsAccountLoading(false);
-      });
 
     return () => {
       active = false;

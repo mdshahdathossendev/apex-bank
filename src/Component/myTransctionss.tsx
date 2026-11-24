@@ -53,7 +53,9 @@ function transactionKind(transaction: TransactionRecord): TransactionKind {
     .trim();
 
   if (type.includes("deposit")) return "deposit";
-  if (type.includes("withdraw")) return "withdrawal";
+  if (type.includes("withdraw") || type === "loan-repayment") {
+    return "withdrawal";
+  }
   if (type.includes("transfer")) return "transfer";
   return "other";
 }
@@ -111,6 +113,9 @@ function statusStyle(status: string): string {
 }
 
 function transactionTitle(transaction: TransactionRecord): string {
+  if (text(transaction.paymentType).toLowerCase() === "loan-repayment") {
+    return "Loan repayment";
+  }
   const kind = transactionKind(transaction);
   const method =
     text(transaction.depositMethod) || text(transaction.withdrawalMethod);
@@ -263,14 +268,18 @@ const MyTransactionss = ({ data }: { data: unknown }) => {
                 {visibleTransactions.length === 1 ? "record" : "records"} found
               </p>
             </div>
-            <div className="w-full sm:max-w-xs">
+            <div className="relative w-full sm:max-w-xs">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-gray-400"
+                size={17}
+              />
               <Input
                 aria-label="Search transactions"
-                className="w-full"
+                className="w-full pl-10"
                 placeholder="Search reference, type, or account"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                startContent={<Search size={17} className="text-gray-400" />}
               />
             </div>
           </div>

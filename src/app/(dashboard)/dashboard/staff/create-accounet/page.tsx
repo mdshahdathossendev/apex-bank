@@ -1,266 +1,72 @@
-"use client";
+import { ObjectId } from "mongodb";
+import Link from "next/link";
+import { headers } from "next/headers";
+import { CreateAccountForm } from "@/Component/CreateAccountForm";
+import { auth, bankingDb } from "@/lib/auth";
 
-import type { FormEvent } from "react";
-import { createAccount, type CreateAccountInput } from "@/lib/action";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { authClient } from "@/lib/auth-client";
-import ActionSuccessPage from "@/Component/ActionSuccessPage";
-export default function CreateAccountPage() {
-  const searchParams = useSearchParams();
-  const customerId = searchParams.get("customerId");
-  const { data: session, isPending } = authClient.useSession();
-  const name = session?.user?.name ?? "";
-  const [createdAccountNumber, setCreatedAccountNumber] = useState("");
+function Message({ children }: { children: string }) {
+  return (
+    <section className="mx-auto max-w-3xl rounded-2xl border border-gray-200 bg-white p-8 text-center">
+      <h1 className="text-xl font-semibold text-gray-900">{children}</h1>
+      <Link
+        href="/dashboard/staff/all-users"
+        className="mt-5 inline-flex rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
+      >
+        Back to customers
+      </Link>
+    </section>
+  );
+}
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+export default async function CreateAccountPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ customerId?: string | string[] }>;
+}) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "staff") {
+    return <Message>Staff access required</Message>;
+  }
 
-    const accountData: CreateAccountInput = {
-      userId: customerId || "",
-      name: name,
-      fatherName: String(formData.get("fatherName") ?? ""),
-      motherName: String(formData.get("motherName") ?? ""),
-      dateOfBirth: String(formData.get("dateOfBirth") ?? ""),
-      gender: String(formData.get("gender") ?? ""),
-      nationality: String(formData.get("nationality") ?? ""),
-      maritalStatus: String(formData.get("maritalStatus") ?? ""),
-      occupation: String(formData.get("occupation") ?? ""),
-      nidNumber: String(formData.get("nidNumber") ?? ""),
-      presentAddress: String(formData.get("presentAddress") ?? ""),
-      permanentAddress: String(formData.get("permanentAddress") ?? ""),
-      accountType: String(formData.get("accountType") ?? ""),
-      branchId: String(formData.get("branchId") ?? ""),
-      initialDeposit: Number(formData.get("initialDeposit") ?? 0),
-      transactionPin: String(formData.get("transactionPin") ?? ""),
-      transactionPinConfirmation: String(
-        formData.get("transactionPinConfirmation") ?? "",
-      ),
-    };
+  const params = await searchParams;
+  const requestedId =
+    typeof params.customerId === "string" ? params.customerId.trim() : "";
+  if (!requestedId || requestedId.length > 128) {
+    return <Message>Select a customer before creating an account</Message>;
+  }
 
-    try {
-      const result = await createAccount(accountData);
-      setCreatedAccountNumber(result.accountNumber);
-    } catch (error) {
-      alert(
-        error instanceof Error ? error.message : "Account creation failed",
-      );
-    }
-  };
+  const userIdClauses: Array<Record<string, unknown>> = [
+    { _id: requestedId },
+    { id: requestedId },
+  ];
+  if (ObjectId.isValid(requestedId)) {
+    userIdClauses.push({ _id: new ObjectId(requestedId) });
+  }
+  const customer = await bankingDb.collection("user").findOne(
+    { $or: userIdClauses },
+    { projection: { _id: 1, id: 1, name: 1, role: 1 } },
+  );
+  if (!customer || customer.role !== "customer") {
+    return <Message>Customer not found</Message>;
+  }
 
-  if (createdAccountNumber) {
-    return (
-      <ActionSuccessPage
-        title="Bank account created"
-        description="The customer account was created and is ready to use."
-        details={[
-          { label: "Account holder", value: name },
-          { label: "Account number", value: createdAccountNumber },
-        ]}
-        primaryLabel="View customers"
-        primaryHref="/dashboard/staff/all-users"
-        secondaryHref="/dashboard/staff"
-      />
-    );
+  const customerId =
+    customer._id instanceof ObjectId
+      ? customer._id.toHexString()
+      : typeof customer._id === "string"
+        ? customer._id
+        : typeof customer.id === "string"
+          ? customer.id
+          : requestedId;
+  const customerName =
+    typeof customer.name === "string" ? customer.name.trim() : "";
+  if (!customerName) {
+    return <Message>Customer name is not available</Message>;
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Create Account</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Enter the customer and account information.
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Customer Information
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Name
-              <input
-                name="name"
-                value={name}
-                readOnly
-                required
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Father&apos;s Name
-              <input
-                name="fatherName"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Mother&apos;s Name
-              <input
-                name="motherName"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Date of Birth
-              <input
-                name="dateOfBirth"
-                type="date"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Gender
-              <select
-                name="gender"
-                defaultValue="MALE"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-              >
-                <option value="MALE">Male</option>
-                <option value="FEMALE">Female</option>
-                <option value="OTHER">Other</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Nationality
-              <input
-                name="nationality"
-                defaultValue="Bangladeshi"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Marital Status
-              <select
-                name="maritalStatus"
-                defaultValue="SINGLE"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-              >
-                <option value="SINGLE">Single</option>
-                <option value="MARRIED">Married</option>
-                <option value="OTHER">Other</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Occupation
-              <input
-                name="occupation"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700 sm:col-span-2">
-              NID Number
-              <input
-                name="nidNumber"
-                inputMode="numeric"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Present Address
-              <textarea
-                name="presentAddress"
-                required
-                rows={3}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Permanent Address
-              <textarea
-                name="permanentAddress"
-                required
-                rows={3}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-          </div>
-        </section>
-
-        <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Bank Account Information
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Account Type
-              <select
-                name="accountType"
-                defaultValue="SAVINGS"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-              >
-                <option value="SAVINGS">Savings</option>
-                <option value="CURRENT">Current</option>
-                <option value="BUSINESS">Business</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Branch ID
-              <input
-                name="branchId"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Initial Deposit (BDT)
-              <input
-                name="initialDeposit"
-                type="number"
-                min="0"
-                defaultValue="0"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Transaction PIN (4 digits)
-              <input
-                name="transactionPin"
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]{4}"
-                maxLength={4}
-                autoComplete="new-password"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-medium text-gray-700">
-              Confirm Transaction PIN
-              <input
-                name="transactionPinConfirmation"
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]{4}"
-                maxLength={4}
-                autoComplete="new-password"
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
-              />
-            </label>
-          </div>
-        </section>
-
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={isPending || !name}
-            className="rounded-lg bg-blue-600 px-5 py-2.5 font-medium text-white hover:bg-blue-700"
-          >
-            Create Account
-          </button>
-        </div>
-      </form>
-    </div>
+    <CreateAccountForm customerId={customerId} customerName={customerName} />
   );
 }

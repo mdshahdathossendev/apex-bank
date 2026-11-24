@@ -1,18 +1,15 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { getTranactionsById } from "@/lib/data";
+import { getCustomerTransactionsByUserId } from "@/lib/data";
 import MyTransactionss from "@/Component/myTransctionss";
-const myTransactions   = async () => {
-    const session = await auth.api.getSession({
+import { redirect } from "next/navigation";
+
+export default async function MyTransactionsPage() {
+  const session = await auth.api.getSession({
     headers: await headers(),
   });
-     const userId =session?.user?.id;
-const data = await getTranactionsById(userId);
-console.log("User Data:", data); 
-    return (
-       <>
-       <MyTransactionss data={data} />
-       </>
-    );
+  if (session?.user.role !== "customer") redirect("/sinin");
+
+  const data = await getCustomerTransactionsByUserId(session.user.id);
+  return <MyTransactionss data={data} />;
 }
-export default myTransactions;

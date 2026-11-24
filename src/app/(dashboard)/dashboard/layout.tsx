@@ -15,7 +15,7 @@ async function DashboardShell({
   if (!role) redirect("/sinin");
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen flex-col bg-gray-50 lg:flex-row">
 
       {role === "admin" && <AdminSidebar />}
 
@@ -23,7 +23,7 @@ async function DashboardShell({
 
       {role === "customer" && <CustomerSidebar />}
 
-      <main className="min-w-0 flex-1 p-6">
+      <main className="min-w-0 flex-1 p-4 sm:p-6">
         {children}
       </main>
     </div>

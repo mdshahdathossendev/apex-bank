@@ -6,12 +6,15 @@ import {
   ChevronDown,
   ChevronUp,
   Fingerprint,
+  LockKeyhole,
   Mail,
   MapPin,
   Search,
+  UnlockKeyhole,
   UserRound,
   Wallet,
 } from "lucide-react";
+import { setBankAccountFrozen } from "@/lib/action";
 import type {
   BankAccountSummary,
   CustomerAccountContact,
@@ -27,13 +30,17 @@ function formatCurrency(value: number | undefined): string {
 }
 
 function statusStyle(status: string): string {
-  return isAccountActive(status)
-    ? "bg-emerald-50 text-emerald-700"
-    : "bg-gray-100 text-gray-700";
+  if (isAccountActive(status)) return "bg-emerald-50 text-emerald-700";
+  if (isAccountFrozen(status)) return "bg-red-50 text-red-700";
+  return "bg-gray-100 text-gray-700";
 }
 
 function isAccountActive(status: string): boolean {
   return status.toLowerCase() === "active";
+}
+
+function isAccountFrozen(status: string): boolean {
+  return status.toLowerCase() === "frozen";
 }
 
 export default function AllBankAccounts({
@@ -47,6 +54,16 @@ export default function AllBankAccounts({
   const [accountType, setAccountType] = useState("all");
   const [accountStatus, setAccountStatus] = useState("all");
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>(
+    {},
+  );
+  const [updatingAccountNumber, setUpdatingAccountNumber] = useState<
+    string | null
+  >(null);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const getStatus = (account: BankAccountSummary) =>
+    statusOverrides[account.accountNumber] ?? account.status;
   const customerEmails = useMemo(() => {
     const emails = new Map<string, string>();
     for (const customer of customers) {
@@ -73,16 +90,17 @@ export default function AllBankAccounts({
       if (accountType !== "all" && account.accountType !== accountType) {
         return false;
       }
-      if (
-        accountStatus === "active" &&
-        !isAccountActive(account.status)
-      ) {
+      const status = getStatus(account);
+      if (accountStatus === "active" && !isAccountActive(status)) {
         return false;
       }
       if (
         accountStatus === "inactive" &&
-        isAccountActive(account.status)
+        (isAccountActive(status) || isAccountFrozen(status))
       ) {
+        return false;
+      }
+      if (accountStatus === "frozen" && !isAccountFrozen(status)) {
         return false;
       }
 
@@ -110,17 +128,37 @@ export default function AllBankAccounts({
         .toLowerCase()
         .includes(query);
     })
-    .sort((left, right) =>
-      left.accountNumber.localeCompare(right.accountNumber),
-    );
+    .sort((left, right) => left.accountNumber.localeCompare(right.accountNumber));
 
   const activeCount = accounts.filter((account) =>
-    isAccountActive(account.status),
+    isAccountActive(getStatus(account)),
   ).length;
   const totalBalance = accounts.reduce(
     (total, account) => total + (account.balance ?? 0),
     0,
   );
+
+  async function toggleAccountFreeze(accountNumber: string, frozen: boolean) {
+    setUpdatingAccountNumber(accountNumber);
+    setStatusMessage("");
+    setStatusError("");
+    try {
+      const result = await setBankAccountFrozen(accountNumber, frozen);
+      setStatusOverrides((current) => ({
+        ...current,
+        [accountNumber]: result.frozen ? "frozen" : "active",
+      }));
+      setStatusMessage(result.message);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error
+          ? error.message
+          : "The bank account status could not be updated.",
+      );
+    } finally {
+      setUpdatingAccountNumber(null);
+    }
+  }
 
   return (
     <main className="mx-auto max-w-7xl space-y-6">
@@ -169,6 +207,18 @@ export default function AllBankAccounts({
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        {statusMessage || statusError ? (
+          <p
+            role={statusError ? "alert" : "status"}
+            className={`border-b px-5 py-3 text-sm ${
+              statusError
+                ? "border-red-100 bg-red-50 text-red-700"
+                : "border-emerald-100 bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {statusError || statusMessage}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-gray-100 p-5 sm:p-6">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Bank accounts</h2>
@@ -219,6 +269,7 @@ export default function AllBankAccounts({
             >
               <option value="all">All statuses</option>
               <option value="active">Active</option>
+              <option value="frozen">Frozen</option>
               <option value="inactive">Inactive</option>
             </select>
           </div>
@@ -239,7 +290,7 @@ export default function AllBankAccounts({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1120px] text-left text-sm">
+            <table className="w-full min-w-[1240px] text-left text-sm">
               <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                 <tr>
                   <th className="px-5 py-4 font-semibold">Account holder</th>
@@ -258,6 +309,10 @@ export default function AllBankAccounts({
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredAccounts.map((account) => {
+                  const status = getStatus(account);
+                  const frozen = isAccountFrozen(status);
+                  const canFreeze =
+                    isAccountActive(status) || isAccountFrozen(status);
                   const email = customerEmails.get(account.userId ?? "");
                   const isExpanded =
                     expandedAccount === account.accountNumber;
@@ -338,24 +393,52 @@ export default function AllBankAccounts({
                         </td>
                         <td className="px-5 py-4">
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${statusStyle(account.status)}`}
+                            className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${statusStyle(status)}`}
                           >
-                            {account.status}
+                            {status}
                           </span>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          {account.userId ? (
-                            <Link
-                              href={`/dashboard/admin/edit-customer/${encodeURIComponent(account.userId)}`}
-                              className="whitespace-nowrap rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                          <div className="flex justify-end gap-2">
+                            {account.userId ? (
+                              <Link
+                                href={`/dashboard/admin/edit-customer/${encodeURIComponent(account.userId)}`}
+                                className="whitespace-nowrap rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                              >
+                                Edit customer
+                              </Link>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={!canFreeze || updatingAccountNumber !== null}
+                              onClick={() =>
+                                void toggleAccountFreeze(
+                                  account.accountNumber,
+                                  !frozen,
+                                )
+                              }
+                              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                frozen
+                                  ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                  : "border-red-200 text-red-700 hover:bg-red-50"
+                              }`}
                             >
-                              Edit customer
-                            </Link>
-                          ) : (
-                            <span className="text-xs text-gray-400">
-                              Unavailable
-                            </span>
-                          )}
+                              {frozen ? (
+                                <UnlockKeyhole size={14} aria-hidden="true" />
+                              ) : (
+                                <LockKeyhole size={14} aria-hidden="true" />
+                              )}
+                              {updatingAccountNumber === account.accountNumber
+                                ? frozen
+                                  ? "Unfreezing..."
+                                  : "Freezing..."
+                                : canFreeze
+                                  ? frozen
+                                    ? "Unfreeze"
+                                    : "Freeze"
+                                  : "Unavailable"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       {isExpanded && (

@@ -1,5 +1,5 @@
 export async function allUserData() {
-  const response = await fetch("http://localhost:4000/api/users", {
+  const response = await fetch("https://bank-server-coral.vercel.app/api/users", {
     cache: "no-store",
   });
 
@@ -44,10 +44,14 @@ export async function getCustomerAccountContacts(): Promise<
 }
 
 export async function getUserById(userId: string) {
-  const response = await fetch(`http://localhost:4000/api/application/${userId}`, {
+  const response = await fetch(`https://bank-server-coral.vercel.app/api/application/${userId}`, {
     cache: "no-store",
   });
-  return response.json();
+  if (!response.ok) {
+    throw new Error(`Could not load account details (HTTP ${response.status})`);
+  }
+  const body = await response.text();
+  return body.trim() ? JSON.parse(body) : null;
 };
 
 export interface UserAccount {
@@ -132,7 +136,7 @@ export async function getAccountByUserId(
   userId: string,
 ): Promise<UserAccount | null> {
   const response = await fetch(
-    `http://localhost:4000/api/application/${encodeURIComponent(userId)}`,
+    `https://bank-server-coral.vercel.app/api/application/${encodeURIComponent(userId)}`,
     { cache: "no-store" },
   );
 
@@ -161,7 +165,7 @@ export async function getCustomerAccountsByUserId(
   userId: string,
 ): Promise<CustomerAccountSummary[]> {
   const response = await fetch(
-    `http://localhost:4000/api/accounts/${encodeURIComponent(userId)}`,
+    `https://bank-server-coral.vercel.app/api/accounts/${encodeURIComponent(userId)}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -202,8 +206,8 @@ function isSuccessfulTransaction(record: Record<string, unknown>): boolean {
 
 export async function getAllBankAccounts(): Promise<BankAccountSummary[]> {
   const [accountsResponse, transactionsResponse] = await Promise.all([
-    fetch("http://localhost:4000/api/application", { cache: "no-store" }),
-    fetch("http://localhost:4000/api/transactions", { cache: "no-store" }),
+    fetch("https://bank-server-coral.vercel.app/api/application", { cache: "no-store" }),
+    fetch("https://bank-server-coral.vercel.app/api/transactions", { cache: "no-store" }),
   ]);
   if (!accountsResponse.ok) {
     throw new Error(`Could not load bank accounts (${accountsResponse.status})`);
@@ -234,6 +238,7 @@ export async function getAllBankAccounts(): Promise<BankAccountSummary[]> {
     let delta = 0;
     if (paymentType === "deposit") delta = amount;
     if (paymentType === "withdrawal") delta = -amount;
+    if (paymentType === "loan-repayment") delta = -amount;
     if (paymentType === "transfer") {
       if (transaction.transferDirection === "sent") delta = -amount;
       if (transaction.transferDirection === "received") delta = amount;
@@ -260,7 +265,9 @@ export async function getAllBankAccounts(): Promise<BankAccountSummary[]> {
         100;
     const storedStatus = optionalString(record.status)?.trim();
     const status =
-      record.isActive === false
+      storedStatus?.toLowerCase() === "frozen"
+        ? "frozen"
+        : record.isActive === false
         ? "inactive"
         : storedStatus || "active";
 
@@ -293,7 +300,7 @@ export async function getCustomerTransactionsByUserId(
   userId: string,
 ): Promise<CustomerTransactionSummary[]> {
   const response = await fetch(
-    `http://localhost:4000/api/transactions/${encodeURIComponent(userId)}`,
+    `https://bank-server-coral.vercel.app/api/transactions/${encodeURIComponent(userId)}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -315,14 +322,8 @@ export async function getCustomerTransactionsByUserId(
   }));
 }
 
-export async function getTranactionsById(id : any) {
-  const response = await  fetch(`http://localhost:4000/api/transactions/${id}`, {
-        cache: "no-store",
-    });
-    return response.json();
-};
 export async function getAllTranactions(): Promise<Record<string, unknown>[]> {
-  const response = await fetch("http://localhost:4000/api/transactions", {
+  const response = await fetch("https://bank-server-coral.vercel.app/api/transactions", {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -333,7 +334,7 @@ export async function getAllTranactions(): Promise<Record<string, unknown>[]> {
 };
 
 export async function getAllLoanApplications() {
-  const response = await fetch("http://localhost:4000/api/loan-application-staff", {
+  const response = await fetch("https://bank-server-coral.vercel.app/api/loan-application-staff", {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -351,7 +352,7 @@ export async function getAllAdminLoanApplications(): Promise<
   Record<string, unknown>[]
 > {
   const response = await fetch(
-    "http://localhost:4000/api/loan-application-admin",
+    "https://bank-server-coral.vercel.app/api/loan-application-admin",
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -366,7 +367,7 @@ export async function getAllAdminLoanApplications(): Promise<
 
 export async function getLoanApplicationById(id: string): Promise<unknown> {
   const response = await fetch(
-    `http://localhost:4000/api/loan-application-staff/${encodeURIComponent(id)}`,
+    `https://bank-server-coral.vercel.app/api/loan-application-staff/${encodeURIComponent(id)}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -386,7 +387,7 @@ async function fetchDashboardRecords(
   endpoint: string,
   resource: string,
 ): Promise<Record<string, unknown>[]> {
-  const response = await fetch(`http://localhost:4000${endpoint}`, {
+  const response = await fetch(`https://bank-server-coral.vercel.app${endpoint}`, {
     cache: "no-store",
   });
   if (!response.ok) {

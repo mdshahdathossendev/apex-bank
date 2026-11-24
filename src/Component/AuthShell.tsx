@@ -126,7 +126,7 @@ export default function AuthShell({
             </p>
 
             <p className="mt-8 text-center text-xs text-[#9aa29f]">
-              © {new Date().getFullYear()} Apex Bank. All rights reserved.
+              Apex Bank. All rights reserved.
             </p>
           </div>
         </section>

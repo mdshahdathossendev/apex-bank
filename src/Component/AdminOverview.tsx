@@ -60,10 +60,15 @@ function isSuccessful(record: DashboardRecord): boolean {
 
 function isLoanDisbursement(record: DashboardRecord): boolean {
   return (
-    Boolean(text(record, "loanApplicationId")) ||
-    text(record, "depositMethod").toLowerCase() === "loan disbursement" ||
-    text(record, "paymentType").toLowerCase() === "loan"
+    !isLoanRepayment(record) &&
+    (Boolean(text(record, "loanApplicationId")) ||
+      text(record, "depositMethod").toLowerCase() === "loan disbursement" ||
+      text(record, "paymentType").toLowerCase() === "loan")
   );
+}
+
+function isLoanRepayment(record: DashboardRecord): boolean {
+  return text(record, "paymentType").toLowerCase() === "loan-repayment";
 }
 
 function recordDate(record: DashboardRecord): Date | null {
@@ -124,6 +129,7 @@ function isRejected(record: DashboardRecord): boolean {
 }
 
 function transactionKind(transaction: DashboardRecord): string {
+  if (isLoanRepayment(transaction)) return "Loan repayment";
   return isLoanDisbursement(transaction)
     ? "Loan disbursement"
     : text(transaction, "paymentType") ||
@@ -134,6 +140,7 @@ function transactionKind(transaction: DashboardRecord): string {
 function bankImpactInCents(transaction: DashboardRecord): number | null {
   if (!isSuccessful(transaction)) return null;
   const amount = amountInCents(transaction.amount);
+  if (isLoanRepayment(transaction)) return amount;
   if (isLoanDisbursement(transaction)) return -amount;
 
   const type = text(transaction, "paymentType").toLowerCase();
@@ -186,6 +193,13 @@ export default function AdminOverview({
       ? total + amountInCents(transaction.amount)
       : total;
   }, 0);
+  const loanRepayments = successfulTransactions.reduce(
+    (total, transaction) =>
+      isLoanRepayment(transaction)
+        ? total + amountInCents(transaction.amount)
+        : total,
+    0,
+  );
   const loanDisbursements = successfulTransactions.reduce((total, transaction) =>
     isLoanDisbursement(transaction)
       ? total + amountInCents(transaction.amount)
@@ -196,7 +210,8 @@ export default function AdminOverview({
     openingAccountDeposits +
     customerDeposits -
     withdrawals -
-    loanDisbursements;
+    loanDisbursements +
+    loanRepayments;
 
   const customerNames = new Map<string, string>();
   for (const customer of customers) {
@@ -303,12 +318,13 @@ export default function AdminOverview({
           Only successful transactions affect the balance. Internal transfers
           do not change the bank total.
         </p>
-        <dl className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <dl className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           {[
             ["Opening bank balance", OPENING_BANK_BALANCE_CENTS, "neutral"],
             ["Account opening deposits", openingAccountDeposits, "positive"],
             ["Customer deposits", customerDeposits, "positive"],
             ["Customer withdrawals", withdrawals, "negative"],
+            ["Loan repayments", loanRepayments, "positive"],
             ["Loan disbursements", loanDisbursements, "negative"],
           ].map(([label, amount, kind]) => (
             <div key={String(label)} className="rounded-xl bg-gray-50 p-4">

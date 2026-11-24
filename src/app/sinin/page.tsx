@@ -2,9 +2,11 @@
 
 import AuthShell from "@/Component/AuthShell";
 import { authClient } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 export default function Sinin() {
+  const router = useRouter();
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -34,7 +36,8 @@ export default function Sinin() {
         return;
       }
 
-      window.location.assign("/dashboard");
+      router.replace("/dashboard");
+      router.refresh();
     } catch {
       setErrorMessage("Something went wrong. Please try again.");
     } finally {
