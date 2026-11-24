@@ -37,7 +37,6 @@ export default function Sinin() {
       }
 
       router.replace("/dashboard");
-      router.refresh();
     } catch {
       setErrorMessage("Something went wrong. Please try again.");
     } finally {
