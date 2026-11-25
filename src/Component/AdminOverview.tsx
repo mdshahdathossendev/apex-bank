@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import Link from "next/link";
+import { io } from "next/cache";
 import {
   CheckCircle,
   Clock,
@@ -183,6 +185,18 @@ function transactionId(transaction: DashboardRecord, index: number): string {
   return id ? id.slice(-8).toUpperCase() : `RECENT-${index + 1}`;
 }
 
+async function DashboardDate() {
+  await io();
+  return (
+    <div className="rounded-xl border bg-white px-4 py-2 text-sm text-gray-600">
+      {new Intl.DateTimeFormat("en-BD", {
+        dateStyle: "full",
+        timeZone: "Asia/Dhaka",
+      }).format(new Date())}
+    </div>
+  );
+}
+
 export default function AdminOverview({
   data,
 }: {
@@ -298,12 +312,15 @@ export default function AdminOverview({
             Live bank balance and customer activity.
           </p>
         </div>
-        <div className="rounded-xl border bg-white px-4 py-2 text-sm text-gray-600">
-          {new Intl.DateTimeFormat("en-BD", {
-            dateStyle: "full",
-            timeZone: "Asia/Dhaka",
-          }).format(new Date())}
-        </div>
+        <Suspense
+          fallback={
+            <div className="rounded-xl border bg-white px-4 py-2 text-sm text-gray-600">
+              Today
+            </div>
+          }
+        >
+          <DashboardDate />
+        </Suspense>
       </header>
 
       <section

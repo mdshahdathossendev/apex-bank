@@ -44,8 +44,8 @@ Add the demo credentials here after creating the corresponding test accounts. No
 | Role | Email | Password |
 | --- | --- | --- |
 | Administrator | Add email | Add password |
-| Staff | Add email | Add password |
-| Customer | Add email | Add password |
+| Staff | hmdshahdat125@gmail.com | hmdshahdat125@gmail.comA |
+| Customer | support1@appleemart.com | support1@appleemart.comA |
 
 Keep demo users limited to test data. Never add production credentials or real user passwords to this file.
 
