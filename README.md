@@ -43,7 +43,7 @@ Add the demo credentials here after creating the corresponding test accounts. No
 
 | Role | Email | Password |
 | --- | --- | --- |
-| Administrator | Add email | Add password |
+| Administrator | mdshahdath36@gmail.com | mdshahdath36@gmail.comA |
 | Staff | hmdshahdat125@gmail.com | hmdshahdat125@gmail.comA |
 | Customer | support1@appleemart.com | support1@appleemart.comA |
 
