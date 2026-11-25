@@ -8,6 +8,10 @@ import {
   HandCoins,
   UserRound,
 } from "lucide-react";
+import {
+  getLoanStatusLabel,
+  getLoanWorkflowStage,
+} from "@/lib/loan-status";
 
 interface LoanApplication {
   _id?: unknown;
@@ -34,15 +38,31 @@ const loanTypes = [
 ] as const;
 const applicationStatuses = [
   "all",
-  "pending",
-  "approved",
+  "review",
+  "sent_for_admin",
+  "accepted",
   "rejected",
+  "other",
 ] as const;
+const statusFilterLabels: Record<
+  Exclude<(typeof applicationStatuses)[number], "all">,
+  string
+> = {
+  review: "Review for Staff",
+  sent_for_admin: "Sent for Admin",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  other: "Other",
+};
 const sortOrders = ["newest", "oldest"] as const;
 
 type LoanTypeFilter = (typeof loanTypes)[number];
 type StatusFilter = (typeof applicationStatuses)[number];
 type SortOrder = (typeof sortOrders)[number];
+
+function statusFilterLabel(status: StatusFilter): string {
+  return status === "all" ? "All statuses" : statusFilterLabels[status];
+}
 
 function isLoanApplication(value: unknown): value is LoanApplication {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -99,12 +119,18 @@ function formatCurrency(value: number): string {
 }
 
 function statusStyle(status: string): string {
-  if (status.includes("approv") || status.includes("success")) {
-    return "bg-emerald-50 text-emerald-700";
+  switch (getLoanWorkflowStage(status)) {
+    case "review":
+      return "bg-amber-50 text-amber-700";
+    case "sent_for_admin":
+      return "bg-blue-50 text-blue-700";
+    case "accepted":
+      return "bg-emerald-50 text-emerald-700";
+    case "rejected":
+      return "bg-red-50 text-red-700";
+    default:
+      return "bg-gray-100 text-gray-600";
   }
-  if (status.includes("reject")) return "bg-red-50 text-red-700";
-  if (status.includes("pending")) return "bg-amber-50 text-amber-700";
-  return "bg-gray-100 text-gray-600";
 }
 
 export default function StaffAllLoanApplications({
@@ -124,13 +150,17 @@ export default function StaffAllLoanApplications({
   const applications = Array.isArray(loanApplications)
     ? loanApplications.filter(isLoanApplication)
     : [];
-  const pendingCount = applications.filter((application) =>
-    text(application.applicationStatus).toLowerCase().includes("pending"),
+  const pendingCount = applications.filter(
+    (application) =>
+      getLoanWorkflowStage(application.applicationStatus) === "review",
   ).length;
-  const approvedCount = applications.filter((application) =>
-    ["approv", "success"].some((status) =>
-      text(application.applicationStatus).toLowerCase().includes(status),
-    ),
+  const sentToAdminCount = applications.filter(
+    (application) =>
+      getLoanWorkflowStage(application.applicationStatus) === "sent_for_admin",
+  ).length;
+  const approvedCount = applications.filter(
+    (application) =>
+      getLoanWorkflowStage(application.applicationStatus) === "accepted",
   ).length;
   const requestedTotal = applications.reduce(
     (total, application) =>
@@ -149,15 +179,9 @@ export default function StaffAllLoanApplications({
   const filteredApplications = applications
     .filter((application) => {
       const loanType = text(application.loanType);
-      const status = text(application.applicationStatus).toLowerCase();
+      const statusStage = getLoanWorkflowStage(application.applicationStatus);
       if (typeFilter !== "all" && loanType !== typeFilter) return false;
-      if (statusFilter !== "all") {
-        const matchesStatus =
-          statusFilter === "approved"
-            ? status.includes("approv") || status.includes("success")
-            : status.includes(statusFilter.slice(0, -1));
-        if (!matchesStatus) return false;
-      }
+      if (statusFilter !== "all" && statusStage !== statusFilter) return false;
 
       const amount = numberValue(application.requestedAmount);
       if (minAmount !== null && (amount === null || amount < minAmount)) {
@@ -222,16 +246,23 @@ export default function StaffAllLoanApplications({
       color: "bg-blue-50 text-blue-700",
     },
     {
-      label: "Pending review",
+      label: "Review for Staff",
       value: String(pendingCount),
-      note: "Awaiting decision",
+      note: "New customer applications",
       icon: CalendarDays,
       color: "bg-amber-50 text-amber-700",
     },
     {
-      label: "Approved",
+      label: "Sent for Admin",
+      value: String(sentToAdminCount),
+      note: "Awaiting final decision",
+      icon: UserRound,
+      color: "bg-blue-50 text-blue-700",
+    },
+    {
+      label: "Accepted",
       value: String(approvedCount),
-      note: "Approved requests",
+      note: "Accepted by admin",
       icon: UserRound,
       color: "bg-emerald-50 text-emerald-700",
     },
@@ -268,7 +299,7 @@ export default function StaffAllLoanApplications({
 
       <section
         aria-label="Loan application summary"
-        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"
       >
         {summary.map(({ label, value, note, icon: Icon, color }) => (
           <article
@@ -347,7 +378,7 @@ export default function StaffAllLoanApplications({
               <option value="all">All statuses</option>
               {applicationStatuses.slice(1).map((status) => (
                 <option key={status} value={status}>
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                  {statusFilterLabel(status)}
                 </option>
               ))}
             </select>
@@ -518,7 +549,7 @@ export default function StaffAllLoanApplications({
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyle(status)}`}
                         >
-                          {status}
+                          {getLoanStatusLabel(status)}
                         </span>
                       </td>
                       <td className="px-5 py-4">

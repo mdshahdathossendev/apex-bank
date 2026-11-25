@@ -1063,12 +1063,18 @@ export async function approveLoanApplication(
         { session: dbSession },
       );
       if (!loanApplication) throw new Error("Loan application was not found");
+      const applicationStatus = String(
+        loanApplication.applicationStatus ?? "",
+      ).toLowerCase();
+      const adminRecordStatus = String(
+        adminRecord.applicationStatus ?? "",
+      ).toLowerCase();
       if (
-        String(loanApplication.applicationStatus ?? "").toLowerCase() !==
-        "pending"
+        !["sent_for_admin", "pending"].includes(applicationStatus) ||
+        !["sent_for_admin", "pending"].includes(adminRecordStatus)
       ) {
         throw new Error(
-          `This loan application cannot be approved from status "${String(loanApplication.applicationStatus ?? "unknown")}"`,
+          `This loan application is not waiting for admin acceptance`,
         );
       }
 
@@ -1121,7 +1127,10 @@ export async function approveLoanApplication(
       }
 
       const loanUpdate = await loanCollection.updateOne(
-        { _id: loanApplicationObjectId, applicationStatus: "pending" },
+        {
+          _id: loanApplicationObjectId,
+          applicationStatus: { $in: ["pending", "sent_for_admin"] },
+        },
         {
           $set: {
             applicationStatus: "success",
@@ -1187,9 +1196,11 @@ export async function approveLoanApplication(
 
     if (!outcome) throw new Error("Loan approval did not complete");
     revalidatePath("/dashboard/admin/admin-loan-applications");
+    revalidatePath("/dashboard/staff/lon-application");
+    revalidatePath("/dashboard/coustomer/lone");
     return {
       ...outcome,
-      message: `Loan approved and ${new Intl.NumberFormat("en-BD").format(outcome.amount)} BDT credited to account ${outcome.accountNumber}.`,
+      message: `Loan accepted and ${new Intl.NumberFormat("en-BD").format(outcome.amount)} BDT credited to account ${outcome.accountNumber}.`,
     };
   } finally {
     await dbSession.endSession();
@@ -1834,8 +1845,8 @@ export async function loneRequest(
   const session = await auth.api.getSession({
     headers: await headers(),
   });
-  if (!session?.user) {
-    throw new Error("Sign in before submitting a loan application");
+  if (session?.user.role !== "customer") {
+    throw new Error("Only customers can submit loan applications");
   }
   if (
     !data ||
@@ -1900,50 +1911,93 @@ export async function loneRequest(
   return { insertedId: result.insertedId };
 }
 export interface LoanApplicationAdminNote {
-    loanApplicationId: string;
-    userId: string;
-    applicantName: string;
-    applicantEmail: string;
-    loanType: string;
-    requestedAmount: number;
-    termMonths: number;
-    purpose: string;
-    employmentStatus: string;
-    monthlyIncome: number;
-    employerName: string;
-    applicationStatus: string;
-    submittedAt: string;
-    staffNote: string;
-    sentAt: string;
+  loanApplicationId: string;
+  staffNote: string;
 }
 
-export async function loneRequestAdmin(data: LoanApplicationAdminNote): Promise<unknown> {
-    const response = await fetch("https://bank-server-coral.vercel.app/api/loan-application-admin", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
+export async function loneRequestAdmin(
+  data: LoanApplicationAdminNote,
+): Promise<{ insertedId: string }> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (session?.user.role !== "staff") {
+    throw new Error("Only staff can send loan applications to admin");
+  }
+  if (!data || typeof data !== "object") {
+    throw new Error("Loan review details are required");
+  }
+  if (!ObjectId.isValid(data.loanApplicationId)) {
+    throw new Error("Invalid loan application ID");
+  }
+
+  const staffNote = validateTextField(data.staffNote, "Staff note", 2000, true);
+  const loanApplicationId = new ObjectId(data.loanApplicationId);
+  const loanCollection = bankingDb.collection("loan-application");
+  const adminLoanCollection = bankingDb.collection("loan-application-admin");
+  const dbSession = mongoClient.startSession();
+
+  try {
+    const outcome = await dbSession.withTransaction(async () => {
+      const loanApplication = await loanCollection.findOne(
+        { _id: loanApplicationId },
+        { session: dbSession },
+      );
+      if (!loanApplication) throw new Error("Loan application was not found");
+      if (
+        String(loanApplication.applicationStatus ?? "").toLowerCase() !==
+        "pending"
+      ) {
+        throw new Error("This loan application is no longer awaiting staff review");
+      }
+
+      const sentAt = new Date().toISOString();
+      const staffName =
+        typeof session.user.name === "string" ? session.user.name : "";
+      const updateResult = await loanCollection.updateOne(
+        { _id: loanApplicationId, applicationStatus: "pending" },
+        {
+          $set: {
+            applicationStatus: "sent_for_admin",
+            staffNote,
+            sentAt,
+            staffUserId: session.user.id,
+            staffName,
+          },
         },
-        body: JSON.stringify(data),
+        { session: dbSession },
+      );
+      if (updateResult.matchedCount !== 1) {
+        throw new Error("Loan status changed before it could be sent to admin");
+      }
+
+      const adminRecord: Document = {
+        ...loanApplication,
+        loanApplicationId: loanApplicationId.toHexString(),
+        applicationStatus: "sent_for_admin",
+        staffNote,
+        sentAt,
+        staffUserId: session.user.id,
+        staffName,
+      };
+      delete adminRecord._id;
+
+      const insertResult = await adminLoanCollection.insertOne(adminRecord, {
+        session: dbSession,
+      });
+      if (!insertResult.acknowledged) {
+        throw new Error("The loan review could not be sent to admin");
+      }
+
+      return { insertedId: insertResult.insertedId.toString() };
     });
 
-    if (!response.ok) {
-        const errorMessage = await response.text();
-        throw new Error(
-            `Sending the loan note to admin failed (${response.status}): ${errorMessage || response.statusText}`,
-        );
-    }
-
-    const result: unknown = await response.json();
-    if (
-        typeof result !== "object" ||
-        result === null ||
-        Array.isArray(result) ||
-        !("acknowledged" in result) ||
-        result.acknowledged !== true ||
-        !("insertedId" in result)
-    ) {
-        throw new Error("Admin API did not confirm the loan note was saved");
-    }
-
-    return result;
+    if (!outcome) throw new Error("Sending the loan review did not complete");
+    revalidatePath("/dashboard/staff/lon-application");
+    revalidatePath("/dashboard/admin/admin-loan-applications");
+    revalidatePath("/dashboard/coustomer/lone");
+    return outcome;
+  } finally {
+    await dbSession.endSession();
+  }
 };

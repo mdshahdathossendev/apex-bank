@@ -9,6 +9,10 @@ import {
   XCircle,
 } from "lucide-react";
 import type { DashboardOverviewData } from "@/lib/data";
+import {
+  getLoanStatusLabel,
+  getLoanWorkflowStage,
+} from "@/lib/loan-status";
 
 type DashboardRecord = Record<string, unknown>;
 
@@ -98,6 +102,19 @@ function formatDate(date: Date | null): string {
 }
 
 function statusStyle(value: string): string {
+  const loanStage = getLoanWorkflowStage(value);
+  if (loanStage === "sent_for_admin") {
+    return "bg-blue-50 text-blue-700";
+  }
+  if (loanStage === "review") {
+    return "bg-amber-50 text-amber-700";
+  }
+  if (loanStage === "accepted") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+  if (loanStage === "rejected") {
+    return "bg-red-50 text-red-700";
+  }
   if (
     value.includes("success") ||
     value.includes("complete") ||
@@ -115,7 +132,11 @@ function statusStyle(value: string): string {
 }
 
 function isPending(record: DashboardRecord): boolean {
-  return status(record).includes("pending") || status(record).includes("process");
+  return (
+    status(record).includes("pending") ||
+    status(record).includes("process") ||
+    status(record).includes("sent_for_admin")
+  );
 }
 
 function isApproved(record: DashboardRecord): boolean {
@@ -465,7 +486,7 @@ export default function AdminOverview({
                     <span
                       className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyle(status(loan))}`}
                     >
-                      {status(loan)}
+                      {getLoanStatusLabel(status(loan))}
                     </span>
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-3">

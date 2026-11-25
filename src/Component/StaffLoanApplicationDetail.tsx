@@ -6,6 +6,10 @@ import { ArrowLeft, FileText, Send } from "lucide-react";
 import { loneRequestAdmin } from "@/lib/action";
 import type { LoanApplicationAdminNote } from "@/lib/action";
 import ActionSuccessPage from "@/Component/ActionSuccessPage";
+import {
+  getLoanStatusLabel,
+  getLoanWorkflowStage,
+} from "@/lib/loan-status";
 
 type LoanApplication = Record<string, unknown>;
 
@@ -65,6 +69,8 @@ export default function StaffLoanApplicationDetail({
   } | null>(null);
 
   const loanApplicationId = text(application._id);
+  const applicationStatus = text(application.applicationStatus);
+  const workflowStage = getLoanWorkflowStage(applicationStatus);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -85,20 +91,7 @@ export default function StaffLoanApplicationDetail({
     setNotice(null);
     const payload: LoanApplicationAdminNote = {
       loanApplicationId,
-      userId: text(application.userId),
-      applicantName: text(application.applicantName),
-      applicantEmail: text(application.applicantEmail),
-      loanType: text(application.loanType),
-      requestedAmount: amount(application.requestedAmount),
-      termMonths: amount(application.termMonths),
-      purpose: text(application.purpose),
-      employmentStatus: text(application.employmentStatus),
-      monthlyIncome: amount(application.monthlyIncome),
-      employerName: text(application.employerName),
-      applicationStatus: text(application.applicationStatus),
-      submittedAt: text(application.submittedAt),
       staffNote,
-      sentAt: new Date().toISOString(),
     };
 
     try {
@@ -106,7 +99,7 @@ export default function StaffLoanApplicationDetail({
       setNote("");
       setNotice({
         kind: "success",
-        message: "Your note and application details were sent to admin.",
+        message: "The application was sent to admin for final acceptance.",
       });
     } catch (error) {
       setNotice({
@@ -124,7 +117,7 @@ export default function StaffLoanApplicationDetail({
   if (notice?.kind === "success") {
     return (
       <ActionSuccessPage
-        title="Loan note sent to admin"
+        title="Loan application sent to admin"
         description={notice.message}
         details={[
           {
@@ -186,6 +179,8 @@ export default function StaffLoanApplicationDetail({
                 ? formatCurrency(amount(value))
                 : key === "termMonths"
                   ? `${amount(value)} months`
+                  : key === "applicationStatus"
+                    ? getLoanStatusLabel(value)
                   : text(value) || "—";
             return (
               <div key={key} className="rounded-xl bg-gray-50 p-4">
@@ -210,54 +205,70 @@ export default function StaffLoanApplicationDetail({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Send a note to admin
-          </h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Your note will be sent with this loan application for admin review.
-          </p>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <label
-            htmlFor="admin-note"
-            className="block text-sm font-medium text-gray-700"
-          >
-            Staff note
-          </label>
-          <textarea
-            id="admin-note"
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            rows={5}
-            maxLength={2000}
-            placeholder="Write a note for the admin..."
-            className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-          />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-xs text-gray-400">
-              {note.length}/2000 characters
-            </span>
-            <button
-              type="submit"
-              disabled={isSending || !note.trim()}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Send size={16} />
-              {isSending ? "Sending..." : "Send note to admin"}
-            </button>
-          </div>
-          {notice?.kind === "error" && (
-            <p
-              role="alert"
-              className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800"
-            >
-              {notice.message}
+      {workflowStage === "review" ? (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Review and send to admin
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Add your review note. The admin will make the final loan
+              decision.
             </p>
-          )}
-        </form>
-      </section>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <label
+              htmlFor="admin-note"
+              className="block text-sm font-medium text-gray-700"
+            >
+              Staff review note
+            </label>
+            <textarea
+              id="admin-note"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              rows={5}
+              maxLength={2000}
+              placeholder="Summarize your review for the admin..."
+              className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">
+                {note.length}/2000 characters
+              </span>
+              <button
+                type="submit"
+                disabled={isSending || !note.trim()}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Send size={16} />
+                {isSending ? "Sending..." : "Send to Admin"}
+              </button>
+            </div>
+            {notice?.kind === "error" && (
+              <p
+                role="alert"
+                className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800"
+              >
+                {notice.message}
+              </p>
+            )}
+          </form>
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+          <h2 className="font-semibold text-gray-900">
+            {getLoanStatusLabel(applicationStatus)}
+          </h2>
+          <p className="mt-2 text-sm text-gray-600">
+            {workflowStage === "sent_for_admin"
+              ? "This application has been sent to the admin for a final decision."
+              : workflowStage === "accepted"
+                ? `The admin accepted this application${text(application.creditedAccountNumber) ? ` and credited account ${text(application.creditedAccountNumber)}` : ""}.`
+                : "This application is no longer waiting for staff review."}
+          </p>
+        </section>
+      )}
     </main>
   );
 }

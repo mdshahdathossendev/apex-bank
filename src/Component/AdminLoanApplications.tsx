@@ -6,6 +6,10 @@ import { HandCoins, Search } from "lucide-react";
 import { approveLoanApplication } from "@/lib/action";
 import type { BankAccountSummary } from "@/lib/data";
 import ActionSuccessPage from "@/Component/ActionSuccessPage";
+import {
+  getLoanStatusLabel,
+  getLoanWorkflowStage,
+} from "@/lib/loan-status";
 
 type LoanApplicationRecord = Record<string, unknown>;
 type StatusFilter = "all" | "pending" | "approved" | "rejected" | "other";
@@ -40,28 +44,23 @@ function amount(record: LoanApplicationRecord, key: string): number | null {
 }
 
 function statusGroup(value: string): Exclude<StatusFilter, "all"> {
-  const normalized = value.toLowerCase();
-  if (normalized.includes("pending") || normalized.includes("process")) {
+  const stage = getLoanWorkflowStage(value);
+  if (stage === "review" || stage === "sent_for_admin") {
     return "pending";
   }
-  if (
-    normalized.includes("approved") ||
-    normalized.includes("success") ||
-    normalized.includes("accepted")
-  ) {
+  if (stage === "accepted") {
     return "approved";
   }
-  if (
-    normalized.includes("reject") ||
-    normalized.includes("deny") ||
-    normalized.includes("fail")
-  ) {
+  if (stage === "rejected") {
     return "rejected";
   }
   return "other";
 }
 
 function statusStyle(status: string): string {
+  if (getLoanWorkflowStage(status) === "sent_for_admin") {
+    return "bg-blue-50 text-blue-700";
+  }
   switch (statusGroup(status)) {
     case "pending":
       return "bg-amber-50 text-amber-700";
@@ -172,7 +171,7 @@ export default function AdminLoanApplications({
       setApprovingId("");
     }
   };
-  const pendingCount = applications.filter(
+  const awaitingAcceptanceCount = applications.filter(
     (application) =>
       statusGroup(text(application, "applicationStatus")) === "pending",
   ).length;
@@ -216,7 +215,7 @@ export default function AdminLoanApplications({
   if (approvalNotice?.type === "success") {
     return (
       <ActionSuccessPage
-        title="Loan approved and disbursed"
+        title="Loan accepted and disbursed"
         description={approvalNotice.message}
         details={[
           {
@@ -252,7 +251,7 @@ export default function AdminLoanApplications({
               Admin loan applications
             </h1>
             <p className="mt-2 text-sm text-white/75">
-              Staff-submitted loan reviews and notes.
+              Staff-reviewed applications waiting for your final decision.
             </p>
           </div>
           <span className="rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white/90">
@@ -277,9 +276,9 @@ export default function AdminLoanApplications({
           </div>
         </article>
         <article className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">Pending applications</p>
+          <p className="text-sm text-gray-500">Sent for Admin</p>
           <p className="mt-1 text-2xl font-bold text-amber-700">
-            {formatCount(pendingCount)}
+            {formatCount(awaitingAcceptanceCount)}
           </p>
         </article>
         <article className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
@@ -333,8 +332,8 @@ export default function AdminLoanApplications({
               className="rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm"
             >
               <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
+              <option value="pending">Sent for Admin</option>
+              <option value="approved">Accepted</option>
               <option value="rejected">Rejected</option>
               <option value="other">Other</option>
             </select>
@@ -380,7 +379,10 @@ export default function AdminLoanApplications({
                     `${text(application, "userId")}-${index}`;
                   const status =
                     text(application, "applicationStatus") || "Unknown";
-                  const isPending = status.toLowerCase() === "pending";
+                  const normalizedStatus = status.toLowerCase();
+                  const isPending =
+                    normalizedStatus === "pending" ||
+                    normalizedStatus === "sent_for_admin";
                   const term = text(application, "termMonths");
                   const loanType = text(application, "loanType") || "Loan";
                   const customerAccounts = accounts.filter(
@@ -445,7 +447,7 @@ export default function AdminLoanApplications({
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${statusStyle(status)}`}
                         >
-                          {status}
+                          {getLoanStatusLabel(status, "Sent for Admin")}
                         </span>
                       </td>
                       <td className="max-w-[300px] whitespace-normal px-5 py-4 text-gray-600">
@@ -508,13 +510,13 @@ export default function AdminLoanApplications({
                               className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {approvingId === recordId
-                                ? "Approving..."
-                                : "Mark success & credit"}
+                                ? "Accepting..."
+                                : "Accept & credit"}
                             </button>
                           </div>
                         ) : (
                           <span className="text-xs text-gray-500">
-                            {status.toLowerCase() === "success"
+                            {getLoanWorkflowStage(status) === "accepted"
                               ? `Credited: ${text(application, "creditedAccountNumber") || "Account unavailable"}`
                               : "No disbursement"}
                           </span>

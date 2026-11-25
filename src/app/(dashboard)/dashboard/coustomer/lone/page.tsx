@@ -22,6 +22,10 @@ import {
   type LoanApplicationInput,
 } from "@/lib/action";
 import ActionSuccessPage from "@/Component/ActionSuccessPage";
+import {
+  getLoanStatusLabel,
+  getLoanWorkflowStage,
+} from "@/lib/loan-status";
 
 const loanTypes = [
   "Personal loan",
@@ -139,8 +143,21 @@ export default function LoanApplicationPage() {
       await loneRequest(applicationData);
       setMessage({
         type: "success",
-        text: "Your loan application was submitted successfully.",
+        text: "Your application was submitted and is waiting for staff review.",
       });
+      setLoanHistoryError("");
+      setIsLoadingLoanHistory(true);
+      try {
+        setLoanCenterData(await getCustomerLoanCenterData());
+      } catch (error) {
+        setLoanHistoryError(
+          error instanceof Error
+            ? `Application submitted, but loan history could not be refreshed: ${error.message}`
+            : "Application submitted, but loan history could not be refreshed.",
+        );
+      } finally {
+        setIsLoadingLoanHistory(false);
+      }
     } catch (error) {
       setMessage({
         type: "error",
@@ -319,9 +336,8 @@ export default function LoanApplicationPage() {
         ) : null}
         {loanCenterData?.loans.map((loan) => {
           const isExpanded = expandedLoanId === loan.id;
-          const loanStatus = loan.applicationStatus.toLowerCase();
-          const isApproved =
-            loanStatus === "success" || loanStatus === "approved";
+          const workflowStage = getLoanWorkflowStage(loan.applicationStatus);
+          const isApproved = workflowStage === "accepted";
           const hasDisbursement = loan.disbursedAmount > 0;
           const canRepay =
             isApproved && hasDisbursement && loan.outstandingAmount > 0;
@@ -376,12 +392,16 @@ export default function LoanApplicationPage() {
                     className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
                       isApproved
                         ? "bg-emerald-50 text-emerald-700"
-                        : loanStatus === "pending"
+                        : workflowStage === "review"
                           ? "bg-amber-50 text-amber-700"
-                          : "bg-gray-100 text-gray-600"
+                          : workflowStage === "sent_for_admin"
+                            ? "bg-blue-50 text-blue-700"
+                            : workflowStage === "rejected"
+                              ? "bg-red-50 text-red-700"
+                              : "bg-gray-100 text-gray-600"
                     }`}
                   >
-                    {loan.applicationStatus}
+                    {getLoanStatusLabel(loan.applicationStatus)}
                   </span>
                   {isExpanded ? (
                     <ChevronUp aria-hidden="true" size={18} />

@@ -10,6 +10,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { getStaffDashboardData } from "@/lib/data";
+import { getLoanStatusLabel } from "@/lib/loan-status";
 
 type DashboardRecord = Record<string, unknown>;
 
@@ -392,8 +393,9 @@ async function StaffDashboardContent() {
                 const loanDetailsHref = text(loan, "_id")
                   ? `/dashboard/staff/lon-application/${encodeURIComponent(text(loan, "_id"))}`
                   : "/dashboard/staff/lon-application";
-                const loanStatus =
-                  text(loan, "applicationStatus") || "Unknown";
+                const loanStatus = getLoanStatusLabel(
+                  text(loan, "applicationStatus"),
+                );
                 return (
                   <div
                     key={loanId}
